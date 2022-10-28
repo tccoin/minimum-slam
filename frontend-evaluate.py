@@ -37,13 +37,15 @@ class Landmark():
         self.landmark_id = landmark_id
         self.measurements = {}
         self.depths = {}
-        self.gt = {}
+        self.gt_uv = {}
+        self.gt_xyz = {}
     def add_measurement(self, frame_id, u, v):
         self.measurements[frame_id] = [u, v]
     def add_depth(self, frame_id, d):
         self.depths[frame_id] = d
-    def add_gt(self, frame_id, u, v):
-        self.gt[frame_id] = [u, v]
+    def add_gt(self, frame_id, uv, xyz):
+        self.gt_uv[frame_id] = uv
+        self.gt_xyz[frame_id] = xyz
 
 class Frame():
     def __init__(self):
@@ -57,9 +59,10 @@ class Frame():
         self.translation = translation
 
 class FrontendEvaluate():
-    def __init__(self, dataset_type, dataset_folder):
+    def __init__(self, dataset_type, dataset_folder, start=0):
         self.dataset_type = dataset_type
         self.dataset_folder = dataset_folder
+        self.start = start
 
     def load_frontend_output(self, file_path):
         self.landmarks = {}
@@ -74,7 +77,7 @@ class FrontendEvaluate():
                     landmark_id = int(data[1])
                     if not landmark_id in self.landmarks:
                         self.landmarks[landmark_id] = Landmark(landmark_id)
-                        self.frames[current_frame_id].add_landmark_id(landmark_id)
+                    self.frames[current_frame_id].add_landmark_id(landmark_id)
                     self.landmarks[landmark_id].add_measurement(current_frame_id, float(data[2]), float(data[3]))
                 elif data[0]=='FRAME':
                     current_frame_id = int(data[1])
@@ -96,6 +99,7 @@ class FrontendEvaluate():
         file_index = '0'*(6-len(str(frame_id)))+str(frame_id)
         depth_file = f'{self.dataset_folder}/depth_left/{file_index}_left_depth.npy'
         depth = np.load(depth_file)
+        print('loading '+depth_file)
         return depth
 
     def _load_color(self, frame_id):
@@ -111,30 +115,35 @@ class FrontendEvaluate():
             for line in file:
                 data = [float(x) for x in line[:-1].split(' ')]
                 data = quaternion_to_rotation_matrix(data[3:]).reshape(9).tolist()+data[:3]
-                self.frames[frame_id].add_pose(data)
-                frame_id += 1
+                if frame_id in self.frames:
+                    self.frames[frame_id].add_pose(data)
+                    frame_id += 1
 
     def load_depth(self):
         for frame_id, frame in self.frames.items():
+            if frame_id < self.start:
+                continue
+            depth = self._load_depth(frame_id)
             for landmark_id in frame.observed_landmark_id:
                 landmark = self.landmarks[landmark_id]
-                depth = self._load_depth(frame_id)
                 pixel_depth = depth[tuple(reversed([int(x) for x in landmark.measurements[frame_id]]))]
                 landmark.add_depth(frame_id, float(pixel_depth))
 
-    def show_matches(self, frame_id, matches):
+    def show_matches(self, window_name, frame_id, matches, timeout=1000):
         curr_color = self._load_color(frame_id)
         next_color = self._load_color(frame_id+1)
         out = np.concatenate([curr_color, next_color], axis=1)
         for match in matches:
             cv2.line(out, match[0], match[1], [255, 0, 0], 1)
-        cv2.imshow('matches', out)
-        cv2.waitKey(1000)
+        cv2.imshow(window_name, out)
+        cv2.waitKey(timeout)
 
     def project_landmarks(self):
         fx, fy, cx, cy = self.camera
         for frame_id, curr_frame in self.frames.items():
             print(f'Projecting landmarks in frame {frame_id}')
+            if frame_id < self.start:
+                continue
             # skip the last frame
             if not (frame_id+1) in self.frames:
                 continue
@@ -146,32 +155,38 @@ class FrontendEvaluate():
                 landmark = self.landmarks[landmark_id]
                 if not frame_id+1 in landmark.measurements:
                     continue
-                # point1： frame[i] relative xyz position
-                point1 = np.array([*landmark.measurements[frame_id], landmark.depths[frame_id]]).reshape((3,1))
-                point1[0] = (point1[0] - cx) * point1[2] / fx
-                point1[1] = (point1[1] - cy) * point1[2] / fy
-                # point2： frame[i] absolute xyz position
+                # point0： frame[i] uvd position
+                point0 = np.array([*landmark.measurements[frame_id], landmark.depths[frame_id]]).reshape((3,1))
+                # point1： frame[i] xyz position in cam frame
+                point1 = np.array([
+                            (point0[0] - cx) * point0[2] / fx,
+                            (point0[1] - cy) * point0[2] / fy,
+                            point0[2]
+                        ])
+                # point2： frame[i] xyz position in odom frame
                 point2 = self.cameraPose.rotation @ point1 + self.cameraPose.translation
-                point2 = curr_frame.rotation @ point1 + curr_frame.translation
-                # point3: frame[i+1] absolute xyz position
-                point3 = inv(next_frame.rotation) @ (point2 - next_frame.translation)
-                # point4: frame[i+1] relative xyz position
-                point4 = inv(self.cameraPose.rotation) @ (point3 - self.cameraPose.translation)
-                # point5: frame[i+1] uv position
-                point5 = [point4[0]/point4[2]*fx+cx, point4[1]/point4[2]*fy+cy]
-                landmark.add_gt(frame_id+1, *point5)
+                # point3： frame[i] xyz position in world frame
+                point3 = curr_frame.rotation @ point2 + curr_frame.translation
+                # point4: frame[i+1] xyz position in odom frame
+                point4 = inv(next_frame.rotation) @ (point3 - next_frame.translation)
+                # point5: frame[i+1] xyz position in cam frame
+                point5 = inv(self.cameraPose.rotation) @ (point4 - self.cameraPose.translation)
+                # point6: frame[i+1] uv position
+                point6 = [float(point5[0]/point5[2]*fx+cx), float(point5[1]/point5[2]*fy+cy)]
+                landmark.add_gt(frame_id+1, point6, point3)
                 # match
                 match = [[],[]]
                 match[0] = [int(x) for x in landmark.measurements[frame_id]]
-                match[1] = [int(x) for x in [point5[0]+640, point5[1]]]
+                match[1] = [int(x) for x in [point6[0]+640, point6[1]]]
                 matches_gt.append(match)
                 match = [[],[]]
                 match[0] = [int(x) for x in landmark.measurements[frame_id]]
                 next_measurement = landmark.measurements[frame_id+1]
                 match[1] = [int(x) for x in [next_measurement[0]+640, next_measurement[1]]]
                 matches_slam.append(match)
-            # self.show_matches(frame_id, matches_gt)
-            self.show_matches(frame_id, matches_slam)
+            if frame_id>100 and frame_id<110:
+                self.show_matches('gt', frame_id, matches_gt, 3000)
+                # self.show_matches('slam', frame_id, matches_slam)
             print(f'number of matches: {len(matches_slam)}')
 
     def calc_error(self):
@@ -179,11 +194,17 @@ class FrontendEvaluate():
         count = 0
         for landmark in self.landmarks.values():
             for frame_id, measurement in landmark.measurements.items():
-                if not frame_id in landmark.gt:
+                if not frame_id in landmark.gt_uv:
                     continue
-                gt = landmark.gt[frame_id]
+                gt = landmark.gt_uv[frame_id]
+                tmp = norm(np.array(measurement)-np.array(gt))
+                tmp1=np.array(measurement)-np.array(gt)
                 error += norm(np.array(measurement)-np.array(gt))
                 count += 1
+                # if len(landmark.gt_uv)>1:
+                #     xxxx=1
+                # if landmark.landmark_id==5:
+                #     xxxx=1
         print(f'error: {error/count}')
     
     def evaluate(self, frontend_output):
@@ -196,6 +217,7 @@ class FrontendEvaluate():
 if __name__ == '__main__':
     dataset_type = 'soulcity'
     dataset_folder = os.path.expanduser('~/Projects/curly_slam/data/soulcity')
-    fe = FrontendEvaluate(dataset_type, dataset_folder)
-    fe.evaluate(os.path.expanduser('~/Projects/curly_slam/data/curly_frontend/test.txt'))
+    fe = FrontendEvaluate(dataset_type, dataset_folder, start=100)
+    fe.evaluate(os.path.expanduser('~/Projects/curly_slam/data/curly_frontend/curly.txt'))
+    # fe.evaluate(os.path.expanduser('~/Projects/curly_slam/data/curly_frontend/vins_frontend.txt'))
     print("EOF")
