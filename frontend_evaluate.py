@@ -43,7 +43,9 @@ class Landmark():
         self.depths = {}
         self.gt_uv = {}
         self.gt_xyz = {}
+        self.frames = []
     def add_measurement_uv(self, frame_id, u, v):
+        self.frames += [frame_id]
         self.uv[frame_id] = [u, v]
     def add_measurement_xyz(self, frame_id, x, y, z):
         self.xyz[frame_id] = [x, y, z]
@@ -215,11 +217,13 @@ class FrontendEvaluate():
             #     xxxx=1
         print(f'error: {error/count}')
     
-    def evaluate(self, frontend_output):
+    def load_dataset(self, frontend_output):
         self.load_frontend_output(frontend_output)
         self.load_poses()
         if self.format == '0':
             self.load_depth()
+    
+    def evaluate(self):
         self.project_landmarks()
         self.calc_error()
 
@@ -227,5 +231,6 @@ if __name__ == '__main__':
     dataset_type = 'soulcity'
     dataset_folder = os.path.expanduser('~/Projects/curly_slam/data/soulcity')
     fe = FrontendEvaluate(dataset_type, dataset_folder, start=0)
-    fe.evaluate(os.path.expanduser('~/Projects/curly_slam/data/curly_frontend/curly.txt'))
+    fe.load_dataset(os.path.expanduser('~/Projects/curly_slam/data/curly_frontend/curly.txt'))
+    fe.evaluate()
     print("EOF")
