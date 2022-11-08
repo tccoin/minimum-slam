@@ -1,3 +1,6 @@
-# slam-frontend-evaluate
+# SLAM Evaluate Tools
 
-This tool evalutes frontend result with the help of the ground truth info from TartanAir dataset.
+This repository inlcudes:
+
+- **frontend-evaluate**: Using ground truth pose and depth in tartanair dataset to compare visual SLAM frontend feature matching performance.
+- **noisy-traj**: Adding Gaussian noise to the trajectory.
