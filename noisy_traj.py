@@ -22,27 +22,23 @@ class NoisyTraj():
                 frame_id += 1
     
     def add_noise(self, pos_sigma, rot_sigma, output_file):
-        last_rot = self.poses[0][0]
-        last_pos = self.poses[0][1]
+        curr_rot = self.poses[0][0]
+        curr_pos = self.poses[0][1]
         output = open(output_file, 'w')
         # write first pose
-        line = np.concatenate([last_pos, last_rot.as_quat()])
+        line = np.concatenate([curr_pos, curr_rot.as_quat()])
         output.write(' '.join([str(x) for x in line])+'\n')
         # iter over poses
+        rot_euler_noise = np.zeros(3)
+        pos_noise = np.zeros(3)
         for frame_id in range(1, len(self.poses)):
             # add noise
             curr_rot = self.poses[frame_id][0]
             curr_pos = self.poses[frame_id][1]
-            rot_euler_noise = np.random.normal(0, rot_sigma, 3)
-            pos_noise = np.random.normal(0, pos_sigma, 3)
-            rel_rot = last_rot.inv()*curr_rot
-            rel_pos = last_rot.inv().as_matrix()@(curr_pos - last_pos)
-            rel_rot_noisy = R.from_euler('zyx', rel_rot.as_euler('zyx')+rot_euler_noise)
-            rel_pos_noisy = rel_pos + pos_noise
-            curr_rot_noisy = last_rot*rel_rot_noisy
-            curr_pos_noisy = last_rot.as_matrix()@rel_pos_noisy+last_pos
-            last_rot = curr_rot
-            last_pos = curr_pos
+            rot_euler_noise += np.random.normal(0, rot_sigma, 3)
+            pos_noise += np.random.normal(0, pos_sigma, 3)
+            curr_rot_noisy = R.from_euler('zyx', curr_rot.as_euler('zyx')+rot_euler_noise)
+            curr_pos_noisy = R.from_euler('zyx', rot_euler_noise).as_matrix()@pos_noise+curr_pos
             # save traj
             line = np.concatenate([curr_pos_noisy, curr_rot_noisy.as_quat()])
             output.write(' '.join([str(x) for x in line])+'\n')
@@ -50,5 +46,5 @@ class NoisyTraj():
 if __name__ == '__main__':
     dataset_folder = os.path.expanduser('~/Projects/curly_slam/data/soulcity/')
     nt = NoisyTraj(dataset_folder+'pose_left.txt')
-    nt.add_noise(0.2, 0.1, dataset_folder+'pose_left_noisy.txt')
+    nt.add_noise(0.1, 0.05, dataset_folder+'pose_left_noisy.txt')
     print("EOF")
