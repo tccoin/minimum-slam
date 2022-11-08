@@ -1,3 +1,6 @@
+'''
+Using ground truth pose and depth in tartanair dataset to compare visual SLAM frontend feature matching performance.
+'''
 import os
 import cv2
 import numpy as np
@@ -35,12 +38,15 @@ def quaternion_to_rotation_matrix(Q):
 class Landmark():
     def __init__(self, landmark_id):
         self.landmark_id = landmark_id
-        self.measurements = {}
+        self.uv = {}
+        self.xyz = {}
         self.depths = {}
         self.gt_uv = {}
         self.gt_xyz = {}
-    def add_measurement(self, frame_id, u, v):
-        self.measurements[frame_id] = [u, v]
+    def add_measurement_uv(self, frame_id, u, v):
+        self.uv[frame_id] = [u, v]
+    def add_measurement_xyz(self, frame_id, x, y, z):
+        self.xyz[frame_id] = [x, y, z]
     def add_depth(self, frame_id, d):
         self.depths[frame_id] = d
     def add_gt(self, frame_id, uv, xyz):
@@ -78,18 +84,18 @@ class FrontendEvaluate():
                     if not landmark_id in self.landmarks:
                         self.landmarks[landmark_id] = Landmark(landmark_id)
                     self.frames[current_frame_id].add_landmark_id(landmark_id)
-                    self.landmarks[landmark_id].add_measurement(current_frame_id, float(data[2]), float(data[3]))
+                    self.landmarks[landmark_id].add_measurement_uv(current_frame_id, float(data[2]), float(data[3]))
+                    if self.format == '1':
+                        self.landmarks[landmark_id].add_depth(current_frame_id, float(data[4]))
+                        self.landmarks[landmark_id].add_measurement_xyz(current_frame_id, float(data[5]), float(data[6]), float(data[7]))
                 elif data[0]=='FRAME':
                     current_frame_id = int(data[1])
                     self.frames[current_frame_id]=Frame()
                 elif data[0]=='FORMAT':
                     self.format = data[1]
                     print('Format version: ', self.format)
-                    if self.format != '0':
-                        print('Wrong format version! Program will quit.')
-                        quit()
                 elif data[0]=='CAMERA':
-                    self.camera = [int(x) for x in data[1:]]
+                    self.camera = [float(x) for x in data[1:]]
                     print('Loading camera: ', self.camera)
                 elif data[0]=='CALIBRATION':
                     self.cameraPose = Frame() # to load the pose
@@ -126,7 +132,7 @@ class FrontendEvaluate():
             depth = self._load_depth(frame_id)
             for landmark_id in frame.observed_landmark_id:
                 landmark = self.landmarks[landmark_id]
-                pixel_depth = depth[tuple(reversed([int(x) for x in landmark.measurements[frame_id]]))]
+                pixel_depth = depth[tuple(reversed([int(x) for x in landmark.uv[frame_id]]))]
                 landmark.add_depth(frame_id, float(pixel_depth))
 
     def show_matches(self, window_name, frame_id, matches, timeout=1000):
@@ -153,10 +159,10 @@ class FrontendEvaluate():
             matches_slam = []
             for landmark_id in curr_frame.observed_landmark_id:
                 landmark = self.landmarks[landmark_id]
-                if not frame_id+1 in landmark.measurements:
+                if not frame_id+1 in landmark.uv:
                     continue
                 # point0： frame[i] uvd position
-                point0 = np.array([*landmark.measurements[frame_id], landmark.depths[frame_id]]).reshape((3,1))
+                point0 = np.array([*landmark.uv[frame_id], landmark.depths[frame_id]]).reshape((3,1))
                 # point1： frame[i] xyz position in cam frame
                 point1 = np.array([
                             (point0[0] - cx) * point0[2] / fx,
@@ -175,25 +181,27 @@ class FrontendEvaluate():
                 point6 = [float(point5[0]/point5[2]*fx+cx), float(point5[1]/point5[2]*fy+cy)]
                 landmark.add_gt(frame_id+1, point6, point3)
                 # match
-                match = [[],[]]
-                match[0] = [int(x) for x in landmark.measurements[frame_id]]
-                match[1] = [int(x) for x in [point6[0]+640, point6[1]]]
-                matches_gt.append(match)
-                match = [[],[]]
-                match[0] = [int(x) for x in landmark.measurements[frame_id]]
-                next_measurement = landmark.measurements[frame_id+1]
-                match[1] = [int(x) for x in [next_measurement[0]+640, next_measurement[1]]]
-                matches_slam.append(match)
-            if frame_id>100 and frame_id<110:
-                self.show_matches('gt', frame_id, matches_gt, 3000)
-                # self.show_matches('slam', frame_id, matches_slam)
+                if landmark_id==1647:
+                    match = [[],[]]
+                    match[0] = [int(x) for x in landmark.uv[frame_id]]
+                    match[1] = [int(x) for x in [point6[0]+640, point6[1]]]
+                    matches_gt.append(match)
+                    match = [[],[]]
+                    match[0] = [int(x) for x in landmark.uv[frame_id]]
+                    next_measurement = landmark.uv[frame_id+1]
+                    match[1] = [int(x) for x in [next_measurement[0]+640, next_measurement[1]]]
+                    matches_slam.append(match)
+            # if frame_id>100 and frame_id<110:
+            if len(matches_gt)>0:
+                self.show_matches('slam', frame_id, matches_slam, 500)
+                # self.show_matches('gt', frame_id, matches_gt)
             print(f'number of matches: {len(matches_slam)}')
 
     def calc_error(self):
         error = 0
         count = 0
         for landmark in self.landmarks.values():
-            for frame_id, measurement in landmark.measurements.items():
+            for frame_id, measurement in landmark.uv.items():
                 if not frame_id in landmark.gt_uv:
                     continue
                 gt = landmark.gt_uv[frame_id]
@@ -201,23 +209,23 @@ class FrontendEvaluate():
                 tmp1=np.array(measurement)-np.array(gt)
                 error += norm(np.array(measurement)-np.array(gt))
                 count += 1
-                # if len(landmark.gt_uv)>1:
-                #     xxxx=1
-                # if landmark.landmark_id==5:
-                #     xxxx=1
+            if len(landmark.xyz)>1:
+                xxxx=1
+            # if landmark.landmark_id==1647:
+            #     xxxx=1
         print(f'error: {error/count}')
     
     def evaluate(self, frontend_output):
         self.load_frontend_output(frontend_output)
         self.load_poses()
-        self.load_depth()
+        if self.format == '0':
+            self.load_depth()
         self.project_landmarks()
         self.calc_error()
 
 if __name__ == '__main__':
     dataset_type = 'soulcity'
     dataset_folder = os.path.expanduser('~/Projects/curly_slam/data/soulcity')
-    fe = FrontendEvaluate(dataset_type, dataset_folder, start=100)
+    fe = FrontendEvaluate(dataset_type, dataset_folder, start=0)
     fe.evaluate(os.path.expanduser('~/Projects/curly_slam/data/curly_frontend/curly.txt'))
-    # fe.evaluate(os.path.expanduser('~/Projects/curly_slam/data/curly_frontend/vins_frontend.txt'))
     print("EOF")
