@@ -8,6 +8,7 @@ from numpy.linalg import inv, norm
 
 def quaternion_to_rotation_matrix(Q):
     # from https://automaticaddison.com/how-to-convert-a-quaternion-to-a-rotation-matrix/
+    # Q: w x y z
     q0 = Q[0]
     q1 = Q[1]
     q2 = Q[2]
@@ -146,7 +147,7 @@ class FrontendEvaluate():
             for frame_id, curr_frame in self.frames.items():
                 line = lines[curr_frame.dataset_seq]
                 data = [float(x) for x in line[:-1].split(' ')]
-                data = quaternion_to_rotation_matrix(data[3:]).reshape(9).tolist()+data[:3]
+                data = quaternion_to_rotation_matrix(data[6:7]+data[3:6]).reshape(9).tolist()+data[:3]
                 curr_frame.add_odom_pose(data)
         with open(self.dataset_path["gt_traj"], 'r') as file:
             dataset_seq = -1
@@ -155,7 +156,7 @@ class FrontendEvaluate():
             for frame_id, curr_frame in self.frames.items():
                 line = lines[curr_frame.dataset_seq]
                 data = [float(x) for x in line[:-1].split(' ')]
-                data = quaternion_to_rotation_matrix(data[3:]).reshape(9).tolist()+data[:3]
+                data = quaternion_to_rotation_matrix(data[6:7]+data[3:6]).reshape(9).tolist()+data[:3]
                 curr_frame.add_gt_pose(data)
 
     def load_depth(self):
@@ -166,19 +167,23 @@ class FrontendEvaluate():
                 pixel_depth = depth[tuple(reversed([int(x) for x in landmark.uv[frame_id]]))]
                 landmark.add_depth(frame_id, float(pixel_depth))
 
-    def show_matches(self, window_name, frame_id, matches, timeout=1000):
-        curr_color = self._load_color(self.frames[frame_id].dataset_seq)
-        next_color = self._load_color(self.frames[frame_id+1].dataset_seq)
-        out = np.concatenate([curr_color, next_color], axis=1)
+    def show_matches(self, window_name, frame_ids, matches, timeout=1000):
+        colors = [self._load_color(self.frames[id].dataset_seq) for id in frame_ids]
+        out = np.concatenate(colors, axis=1)
         for match in matches:
-            cv2.line(out, match[0], match[1], [255, 0, 0], 1)
+            points = [[int(x) for x in p] for p in match]
+            for i,point in enumerate(points):
+                point[0] += colors[i].shape[1]*i
+                cv2.circle(out, point, 4, [0, 255, 0])
+            for i in range(len(points)-1):
+                cv2.line(out, points[i], points[i+1], [255, 0, 0], 1)
         cv2.imshow(window_name, out)
         cv2.waitKey(timeout)
 
     def project_landmarks(self, viz_matches):
         fx, fy, cx, cy = self.camera
         for frame_id, curr_frame in self.frames.items():
-            print(f'Projecting landmarks in frame {frame_id}')
+            # print(f'Projecting landmarks in frame {frame_id}')
             # skip the last frame
             if not (frame_id+1) in self.frames:
                 continue
@@ -201,28 +206,23 @@ class FrontendEvaluate():
                 # point2： frame[i] xyz position in odom frame
                 point2 = self.cameraPose.rotation @ point1 + self.cameraPose.translation
                 # point3： frame[i] xyz position in world frame
-                point3 = curr_frame.rotation @ point2 + curr_frame.translation
+                point3 = curr_frame.gt_rotation @ point2 + curr_frame.gt_translation
                 # point4: frame[i+1] xyz position in odom frame
-                point4 = inv(next_frame.rotation) @ (point3 - next_frame.translation)
+                point4 = inv(next_frame.gt_rotation) @ (point3 - next_frame.gt_translation)
                 # point5: frame[i+1] xyz position in cam frame
                 point5 = inv(self.cameraPose.rotation) @ (point4 - self.cameraPose.translation)
                 # point6: frame[i+1] uv position
                 point6 = [float(point5[0]/point5[2]*fx+cx), float(point5[1]/point5[2]*fy+cy)]
                 landmark.add_gt(frame_id+1, point6, point3)
                 # match
-                match = [[],[]]
-                match[0] = [int(x) for x in landmark.uv[frame_id]]
-                match[1] = [int(x) for x in [point6[0]+640, point6[1]]]
-                matches_gt.append(match)
-                match = [[],[]]
-                match[0] = [int(x) for x in landmark.uv[frame_id]]
-                next_measurement = landmark.uv[frame_id+1]
-                match[1] = [int(x) for x in [next_measurement[0]+640, next_measurement[1]]]
-                matches_slam.append(match)
+                matches_gt.append([landmark.uv[frame_id], point6])
+                matches_slam.append([landmark.uv[frame_id], landmark.uv[frame_id+1]])
+                if len(landmark.gt_uv)>5:
+                    tmp = 123
             if len(matches_gt)>0 and viz_matches:
-                self.show_matches('slam', frame_id, matches_slam, 500)
-                self.show_matches('gt', frame_id, matches_gt)
-            print(f'number of matches: {len(matches_slam)}')
+                self.show_matches('slam', [frame_id, frame_id+1], matches_slam)
+                self.show_matches('gt', [frame_id, frame_id+1], matches_gt, 2000)
+                print(f'number of matches: {len(matches_slam)}')
 
     def calc_error(self):
         error = 0
@@ -232,8 +232,6 @@ class FrontendEvaluate():
                 if not frame_id in landmark.gt_uv:
                     continue
                 gt = landmark.gt_uv[frame_id]
-                tmp = norm(np.array(measurement)-np.array(gt))
-                tmp1=np.array(measurement)-np.array(gt)
                 error += norm(np.array(measurement)-np.array(gt))
                 count += 1
             if len(landmark.xyz)>1:
@@ -265,6 +263,6 @@ if __name__ == '__main__':
     }
     
     frontend = FrontendEvaluate(dataset_type, dataset_path)
-    frontend.load_dataset(start=100, end=105)
+    frontend.load_dataset(start=0, end=500)
     frontend.evaluate(viz_matches=False)
     print("EOF")
