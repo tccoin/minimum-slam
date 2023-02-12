@@ -1,6 +1,6 @@
 import numpy as np
 import cv2
-folderPath = "/home/link/Projects/curly_slam/data/tartanair/scenes/seasidetown/Easy/P000"
+folderPath = "/home/link/Projects/curly_slam/data/tartanair/scenes/oldtown/Easy/P000"
 imageFolder = "/depth_left/"
 savePath = folderPath+"/depth_image/"
 trajName = "pose_left.txt"
