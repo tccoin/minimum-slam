@@ -1,40 +1,47 @@
+import os
 import numpy as np
 import cv2
 from evo.tools import file_interface
-from evo.core.trajectory import PoseTrajectory3D, PosePath3D
-import os
-from scipy.spatial.transform import Rotation as R
+from spatialmath import *
 
 
-class DataLoader():
+class DataLoaderBase():
     def __init__(self, dataset_folder):
-        self.dataset_folder = os.path.expanduser(dataset_folder)
-        if self.dataset_folder[-1] != '/':
-            self.dataset_folder += '/'
+        self.dataset_folder = self._fix_path(
+            os.path.expanduser(dataset_folder))
         self.depth_folder = 'depth_left'
         self.stereo_folders = ['image_left', 'image_right']
         self.gt_filename = 'pose_left.txt'
         self.odom_filename = 'pose_left.txt'
-        self.current_index = 0
+        self.curr_index = 0
         self.index_interval = 1
         self.end_index = -1
         self.camera = [0, 0, 0, 0]  # fx, fy, cx, cy
         self.pose_odom_cam = np.eye(4)  # p_odom = T_cam_odom * p_cam
         self.image_size = (0, 0)  # width, height
 
-    def read_current_rgbd(self):
+    def read_current_rgbd(self) -> tuple[np.ndarray, np.ndarray]:
         raise NotImplementedError()
 
-    def read_current_stereo(self):
+    def read_current_stereo(self) -> tuple[np.ndarray, np.ndarray]:
         raise NotImplementedError()
 
-    def read_ground_truth(self):
+    def read_current_ground_truth(self) -> SE3:
         raise NotImplementedError()
 
-    def read_odometry(self):
+    def read_current_odometry(self) -> SE3:
         raise NotImplementedError()
 
-    def get_total_number(self):
+    def load_ground_truth(self) -> None:
+        raise NotImplementedError()
+
+    def load_odometry(self) -> None:
+        raise NotImplementedError()
+
+    def set_odometry(self, traj) -> None:
+        raise NotImplementedError()
+
+    def get_total_number(self) -> int:
         '''
         count number of frames according to number of files in color folder
         '''
@@ -42,13 +49,13 @@ class DataLoader():
         return len([entry for entry in os.listdir(dir_path)
                     if os.path.isfile(os.path.join(dir_path, entry))])
 
-    def _load_traj(self, traj_type, traj_filename, ignore_timestamps=False, add_timestamps=False):
+    def _load_traj(self, traj_type, traj_filename, ignore_timestamps=False, add_timestamps=False) -> SE3:
         '''
         load trajectory from file
         @param traj_type: ['kitti', 'tum', 'euroc']
         @param ignore_timestamps: if True, ignore the timestamps in the first column
         @param add_timestamps: if True, add timestamps to the first column
-        @return: evo.core.trajectory.PoseTrajectory3D
+        @return: SE3
         '''
         function_dict = {
             'kitti': file_interface.read_kitti_poses_file,
@@ -70,12 +77,15 @@ class DataLoader():
                         new_line = str(i)+' '+line
                     output_file.write(new_line)
             file_path = tmp_file_path
-        traj = function_dict[traj_type](file_path)
+        traj_evo = function_dict[traj_type](file_path)
+        # convert PoseTrajectory3D to SE3
+        traj = SE3(traj_evo.poses_se3)
+        # remove tmp file
         if ignore_timestamps or add_timestamps:
             os.remove(tmp_file_path)
         return traj
 
-    def _zeros(self, str_length, num):
+    def _zeros(self, str_length, num) -> str:
         '''
         @param str_length: length of the string
         @param num: number of zeros
@@ -83,60 +93,69 @@ class DataLoader():
         '''
         return '0' * (str_length - len(str(num))) + str(num)
 
-    def get_current_index(self):
-        return self.current_index
+    def _fix_path(self, path) -> str:
+        '''
+        add a / at the end of the path if it is not there
+        '''
+        return path if path[-1] == '/' else path+'/'
 
-    def set_current_index(self, index):
-        self.current_index = index
+    def get_curr_index(self) -> int:
+        return self.curr_index
 
-    def load_next_frame(self):
+    def set_curr_index(self, index) -> None:
+        self.curr_index = index
+
+    def load_next_frame(self) -> bool:
         '''
         @return: True if there are still frames to load
         '''
-        self.current_index += self.index_interval
+        self.curr_index += self.index_interval
         if self.end_index > 0:
-            return self.current_index <= self.end_index
+            return self.curr_index <= self.end_index
         else:
             return True
 
-    def add_noise(self, traj, mean_sigma=[5e-3, 5e-3], sigma=[1e-2, 1e-2], seed=None):
+    def add_noise(self, traj, mean_sigma=[2e-4, 2e-4], sigma=[1e-3, 1e-3], seed=None) -> SE3:
         '''
         add noise to the trajectory
-        @param traj: evo.core.trajectory.PoseTrajectory3D
+        @param traj: SE3
         @param mean_sigma: standard deviation of the mean of the noise [translation, rotation]
         @param sigma: standard deviation of the noise [translation, rotation]
         @param seed: random seed
-        @return: evo.core.trajectory.PosePath3D
+        @return: SE3
         '''
         if seed is None:
             seed = np.random.randint(0, 100000)
             print(f'Adding noise, seed={seed}')
         np.random.seed(seed)
-        new_traj = [traj.poses_se3[0]]
-        noise_t = np.zeros([3, 1])
-        noise_r = np.eye(3)
-        noise_t_bias = np.random.normal(0, mean_sigma[0], (3, 1))
-        noise_r_bias = R.from_euler('xyz', np.random.normal(
-            0, mean_sigma[1], 3)).as_matrix()
-        for i in range(1, len(traj.poses_se3)):
-            noise_t_delta = noise_r @ (np.random.normal(
-                0, sigma[0], (3, 1)) + noise_t_bias)
-            noise_r_delta = R.from_euler('xyz', np.random.normal(
-                0, sigma[1], 3)).as_matrix() @ noise_r_bias
-            noise_r = noise_r_delta @ noise_r
-            noise_t = noise_r_delta @ noise_t_delta + noise_t
-            new_pose = np.eye(4)
-            new_pose[:3, 3:4] = noise_t + traj.poses_se3[i][:3, 3:4]
-            new_pose[:3, :3] = noise_r @ traj.poses_se3[i][:3, :3]
-            new_traj += [new_pose]
-        return PosePath3D(poses_se3=new_traj)
+        new_traj = SE3(traj)
+        noise = SE3()
+        noise_t_bias = SE3.Trans(np.random.normal(0, mean_sigma[0], 3))
+        noise_r_bias = SE3.RPY(*np.random.normal(0, mean_sigma[1], 3))
+        for i in range(1, len(traj)):
+            noise_t_delta = SE3.Trans(
+                np.random.normal(0, sigma[0], 3)) * noise_t_bias
+            noise_r_delta = SE3.RPY(
+                *np.random.normal(0, sigma[1], 3)) * noise_r_bias
+            # print(new_traj[i])
+            # print(noise_t_bias * noise_t_delta * new_traj[i])
+            # print((noise_r_bias * noise_r_delta)
+            #       * (noise_t_bias * noise_t_delta * new_traj[i]))
+            noise = noise_r_delta * noise_t_delta * noise
+            new_pose = noise * new_traj[i]
+            new_traj[i] = new_pose
+        return new_traj
 
 
-class TartanAirLoader(DataLoader):
-    def __init__(self, dataset_folder, depth_folder='depth_left/'):
+class TartanAirLoader(DataLoaderBase):
+    def __init__(self, dataset_folder, depth_folder='depth_left/',
+                 stereo_folders_left='image_left/', stereo_folders_right='image_right/'):
         super().__init__(dataset_folder)
-        self.depth_folder = depth_folder
-        self.stereo_folders = ['image_left/', 'image_right/']
+        self.depth_folder = self._fix_path(depth_folder)
+        self.stereo_folders = [
+            self._fix_path(stereo_folders_left),
+            self._fix_path(stereo_folders_right)
+        ]
         self.gt_filename = 'pose_left.txt'
         self.odom_filename = 'pose_left.txt'
         self.camera = [320, 320, 320, 240]  # fx, fy, cx, cy
@@ -148,38 +167,44 @@ class TartanAirLoader(DataLoader):
         ])  # p_odom = T_odom_cam * p_cam
         self.image_size = (640, 480)  # width, height
 
-    def read_current_rgbd(self):
-        index_str = super()._zeros(6, self.current_index)
+    def read_current_rgbd(self) -> tuple[np.ndarray, np.ndarray]:
+        index_str = super()._zeros(6, self.curr_index)
         left_color = cv2.imread(
             f'{self.dataset_folder}{self.stereo_folders[0]}{index_str}_left.png')
         left_depth = np.load(
             f'{self.dataset_folder}{self.depth_folder}{index_str}_left_depth.npy')
         return (left_color, left_depth)
 
-    def read_current_stereo(self):
-        index_str = self._zeros(6, self.current_index)
+    def read_current_stereo(self) -> tuple[np.ndarray, np.ndarray]:
+        index_str = self._zeros(6, self.curr_index)
         left_color = cv2.imread(
             f'{self.dataset_folder}{self.stereo_folders[0]}{index_str}_left.png')
         right_color = cv2.imread(
             f'{self.dataset_folder}{self.stereo_folders[1]}{index_str}_right.png')
         return (left_color, right_color)
 
-    def read_ground_truth(self):
-        self.gt = self._load_traj('tum', 'pose_left.txt', add_timestamps=True)
-        return self.gt
+    def read_current_ground_truth(self) -> SE3:
+        return self.gt[self.curr_index]
 
-    def read_odometry(self):
+    def read_current_odometry(self) -> SE3:
+        return self.odom[self.curr_index]
+
+    def load_ground_truth(self) -> None:
+        self.gt = self._load_traj('tum', 'pose_left.txt', add_timestamps=True)
+
+    def load_odometry(self, traj=None) -> None:
         self.odom = self._load_traj(
             'tum', 'pose_left.txt', add_timestamps=True)
-        return self.odom
+
+    def set_odometry(self, traj) -> None:
+        self.odom = traj
 
 
-if __name__ == '__main__':
-    dataset_folder = './test/traj_examples'
-    data_loader = DataLoader(dataset_folder)
-    traj = data_loader._DataLoader__load_traj(
-        'tum', 'tum_no_timestamp.txt', add_timestamps=True)
-    print(traj.num_poses)
-    traj = data_loader._DataLoader__load_traj(
-        'kitti', 'kitti_with_timestamp.txt', ignore_timestamps=True)
-    print(traj)
+def load_dataset(params):
+    if params['dataset']['type'] == 'tartanair':
+        return TartanAirLoader(
+            params['dataset']['folder'],
+            depth_folder=params['dataset']['depth']
+        )
+    else:
+        raise NotImplementedError

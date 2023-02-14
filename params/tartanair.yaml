@@ -1,0 +1,18 @@
+dataset:
+  type: tartanair
+  folder: ~/Projects/curly_slam/data/tartanair/scenes/soulcity/Easy/P001/
+  depth: depth_left
+frontend:
+  keyframe:
+    rot_weight: 2
+    trans_weight: 1
+    threshold: 0.3
+  feature:
+    detector: sift
+    sample: vanilla
+    number: 1000
+  match:
+    matcher: bruteforce # opticalflow
+    cross_check: true
+log:
+  label: tartanair
