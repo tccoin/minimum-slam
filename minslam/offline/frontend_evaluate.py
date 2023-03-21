@@ -47,6 +47,7 @@ class Landmark():
         self.depths = {}
         self.gt_uv = {}
         self.gt_xyz = {}
+        self.match_error = {}
         self.frames = []
 
     def add_measurement_uv(self, frame_id, u, v):
@@ -69,6 +70,11 @@ class Landmark():
     def add_gt_uv(self, frame_id, uv):
         self.gt_uv[frame_id] = uv
 
+    def add_match_error(self, frame_id, err):
+        self.match_error[frame_id] = err
+    
+
+
 
 class Frame():
     def __init__(self, frame_id):
@@ -83,16 +89,16 @@ class Frame():
         self.dataset_seq = dataset_seq
 
     def add_odom_pose(self, data):
-        rotation = np.array([float(x) for x in data[0:9]]).reshape((3, 3))
-        translation = np.array([float(x) for x in data[9:12]]).reshape((3, 1))
-        self.rotation = rotation
-        self.translation = translation
+        # x y z qx qx qz qw
+        data = [float(x) for x in data]
+        self.rotation = quaternion_to_rotation_matrix([data[6]]+data[3:6])
+        self.translation = np.array([float(x) for x in data[:3]]).reshape([3, 1])
 
     def add_gt_pose(self, data):
-        rotation = np.array([float(x) for x in data[0:9]]).reshape((3, 3))
-        translation = np.array([float(x) for x in data[9:12]]).reshape((3, 1))
-        self.gt_rotation = rotation
-        self.gt_translation = translation
+        data = [float(x) for x in data]
+        self.gt_rotation = quaternion_to_rotation_matrix([data[6]]+data[3:6])
+        self.gt_translation = np.array([float(x) for x in data[:3]]).reshape([3, 1])
+        x=1
 
     def align_gt(self, gt_rot, gt_pos, rot, pos):
         self.gt_translation = rot@(np.linalg.inv(gt_rot)
@@ -132,11 +138,10 @@ class FrontendEvaluate():
                     self.frames[current_frame_id].add_landmark_id(landmark_id)
                     self.landmarks[landmark_id].add_measurement_uv(
                         current_frame_id, float(data[2]), float(data[3]))
-                    if self.format == '1':
-                        self.landmarks[landmark_id].add_depth(
-                            current_frame_id, float(data[4]))
-                        self.landmarks[landmark_id].add_measurement_xyz(
-                            current_frame_id, float(data[5]), float(data[6]), float(data[7]))
+                    self.landmarks[landmark_id].add_depth(
+                        current_frame_id, float(data[4]))
+                    self.landmarks[landmark_id].add_measurement_xyz(
+                        current_frame_id, float(data[5]), float(data[6]), float(data[7]))
                 elif data[0] == 'DATASET_SEQ':
                     if not current_frame_id >= start and current_frame_id < end:
                         continue
@@ -152,12 +157,16 @@ class FrontendEvaluate():
                 elif data[0] == 'FORMAT':
                     self.format = data[1]
                     print('Format version: ', self.format)
-                elif data[0] == 'CAMERA':
+                    if self.format != '2':
+                        print('Warning: this format is deprecated, please use the latest version')
+                        return
+                elif data[0] == 'CAMERA_INTRINSIC':
                     self.camera = [float(x) for x in data[1:]]
                     print('Loading camera: ', self.camera)
-                elif data[0] == 'CALIBRATION':
+                elif data[0] == 'CAMERA_POSE':
                     self.cameraPose = Frame(-1)  # store the pose
                     self.cameraPose.add_odom_pose(data[1:])
+                    # print('camera pose: \n', self.cameraPose.rotation,'\n', self.cameraPose.translation)
 
     def _load_depth(self, frame_id):
         file_index = '0'*(6-len(str(frame_id)))+str(frame_id)
@@ -185,9 +194,7 @@ class FrontendEvaluate():
             for frame_id, curr_frame in self.frames.items():
                 dataset_seq = min(len(lines)-1, curr_frame.dataset_seq)
                 line = lines[dataset_seq]
-                data = [float(x) for x in line[:-1].split(' ')]
-                data = quaternion_to_rotation_matrix(
-                    data[6:7]+data[3:6]).reshape(9).tolist()+data[:3]
+                data = line[:-1].split(' ')
                 curr_frame.add_odom_pose(data)
 
     def load_gt_traj(self):
@@ -197,9 +204,7 @@ class FrontendEvaluate():
             for frame_id, curr_frame in self.frames.items():
                 dataset_seq = min(len(lines), curr_frame.dataset_seq)
                 line = lines[dataset_seq]
-                data = [float(x) for x in line[:-1].split(' ')]
-                data = quaternion_to_rotation_matrix(
-                    data[6:7]+data[3:6]).reshape(9).tolist()+data[:3]
+                data = line[:-1].split(' ')
                 curr_frame.add_gt_pose(data)
 
     def align_start_point(self):
@@ -220,27 +225,30 @@ class FrontendEvaluate():
                     reversed([int(x) for x in landmark.uv[frame_id]]))]
                 landmark.add_depth(frame_id, float(pixel_depth))
 
-    def show_matches(self, window_name, frame_ids, matches, timeout=1000, match_info=None):
-        frame_ids = frame_ids[-5:]
+    def show_matches(self, window_name, frame_ids, matches, match_color=None, timeout=1000, match_info=None, max_len=100):
+        frame_ids = frame_ids[-max_len:]
+        for i in range(len(matches)):
+            matches[i] = matches[i][-max_len:]
+        if match_info is None:
+            match_info = [['']*len(frame_ids)]*len(matches)
+        if match_color is None:
+            match_color = [np.random.randint(0,256,3) for i in range(len(matches))]
         colors = [self._load_color(self.frames[id].dataset_seq)
                   for id in frame_ids]
         out = np.concatenate(colors, axis=1)
-        if match_info is None:
-            match_info = [['', '']]*len(matches)
-        print(len(matches[0]), matches[0])
-        matches[0] = matches[0][-5:]
-        print(len(matches[0]), matches[0])
-        match_info = match_info[-5:]
-        for match, info in zip(matches, match_info):
+        print(f'Visualizing matches, frame: [{frame_ids[0]}, {frame_ids[-1]}]')
+        for match, info, color in zip(matches, match_info, match_color):
             points = [[int(x) for x in p] for p in match]
+            color = [int(x) for x in color]
             for i, point in enumerate(points):
                 point[0] += colors[i].shape[1]*i
-                cv2.circle(out, point, 4, [0, 255, 0])
+                cv2.circle(out, point, 4, color)
             for i in range(len(points)-1):
-                cv2.line(out, points[i], points[i+1], [255, 0, 0], 1)
+                cv2.line(out, points[i], points[i+1], color, 1)
             for point, text in zip(points, info):
+                text_pos = [point[0], point[1]-5]
                 cv2.putText(out, str(text), point,
-                            cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 0, 0), 1)
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
         cv2.namedWindow(window_name, cv2.WINDOW_NORMAL)
         cv2.imshow(window_name, out)
         cv2.waitKey(timeout)
@@ -311,21 +319,20 @@ class FrontendEvaluate():
     def calc_error(self):
         error = 0
         count = 0
-        num = 0
+        total = 0
         for landmark in self.landmarks.values():
             for frame_id, measurement in landmark.uv.items():
                 if not frame_id in landmark.gt_uv:
                     continue
                 gt = landmark.gt_uv[frame_id]
                 err = norm(np.array(measurement)-np.array(gt))
+                landmark.add_match_error(frame_id, err)
                 error += err
-                num += 1
-                if err > 25:
+                total += 1
+                if err > 10:
                     count += 1
-            if len(landmark.xyz) > 1:
-                xxxx = 1
         print(
-            f'error: {error/len(self.frames)}, error>10:{count}/{num}, frame={len(self.frames)}')
+            f'error per frame: {error/len(self.frames)}, error per match: {error/total}, error>10:{count}/{total}, frame={len(self.frames)}')
 
     def load_dataset(self, start=0, end=10000, align_start_point=True):
         self.load_frontend_output(start, end)
@@ -360,13 +367,36 @@ class FrontendEvaluate():
         self.calc_error()
         self.check_size()
 
+    def visualize_outliers(self, error_threshold=10):
+        for landmark in self.landmarks.values():
+            frames = []
+            matches = [[],[]]
+            match_info = [[],[]]
+            outlier_frame_index = -1
+            for i in range(len(landmark.frames)):
+                frame_id = landmark.frames[i]
+                if landmark.match_error[frame_id] > error_threshold:
+                    outlier_frame_index = i
+            if outlier_frame_index>-1:
+                max_len = 5
+                frames = landmark.frames[max(0, outlier_frame_index+1-max_len):outlier_frame_index+1]
+                for frame_id in frames:
+                    if len(frames)==1:
+                        print(f'frame_id={frame_id}, landmark_id={landmark.landmark_id}, error={landmark.match_error[frame_id]}')
+                    matches[0].append(landmark.uv[frame_id])
+                    match_info[0].append(landmark.depths[frame_id])
+                    matches[1].append(landmark.gt_uv[frame_id])
+                    match_info[1].append('')
+                    # match_info[1].append(landmark.depths[frame_id])
+                self.show_matches('outlier', frames, matches, match_info=match_info, match_color=[[255,100,100], [100,100,255]], timeout=-1)
+
 
 if __name__ == '__main__':
     dataset_type = 'tartanair'
     dataset_folder = os.path.expanduser(
-        '~/Projects/curly_slam/data/tartanair/scenes/soulcity/Easy/P001')
+        '~/Projects/curly_slam/data/tartanair/scenes/abandonedfactory/Easy/P001')
     frontend_file = os.path.expanduser(
-        '~/Projects/curly_slam/data/curly_frontend/curly_tartanair_soulcity.txt')
+        '~/Projects/curly_slam/data/log/abandonedfactory_easy_p001.txt')
     dataset_path = {
         'depth': dataset_folder+'/depth_left',
         'color': dataset_folder+'/image_left',
@@ -378,4 +408,5 @@ if __name__ == '__main__':
     frontend = FrontendEvaluate(dataset_type, dataset_path)
     frontend.load_dataset(start=0, end=500)
     frontend.evaluate(viz_matches=False)
+    # frontend.visualize_outliers(error_threshold=20)
     print("EOF")

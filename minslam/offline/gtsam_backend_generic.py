@@ -373,8 +373,8 @@ if __name__ == '__main__':
     for i in range(50,51,1): #727
         print(f'===== FRAME LENGTH {i} =====')
         frontend.load_dataset(start=0, end=i, align_start_point=False)
-        frontend.calc_xyz_locally()
-        frontend.get_ground_truth_match()
+        frontend.calc_ground_truth_xyz()
+        frontend.calc_ground_truth_match()
         frontend.evaluate(viz_matches=False)
         backend.set_frontend(frontend)
         # backend.plot(0,True, 100, True, False, True)

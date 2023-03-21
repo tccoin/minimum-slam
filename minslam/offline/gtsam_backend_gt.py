@@ -92,10 +92,6 @@ class GTSAM_Backend():
                 self.graph.push_back(gtsam.PriorFactorPose3(
                     X(frame_id), pose, first_pose_prior_noise
                 ))
-            elif frame_id <= first_frame_id+3:
-                self.graph.push_back(gtsam.PriorFactorPose3(
-                    X(frame_id), pose, pose_prior_noise
-                ))
             for landmark_id in curr_frame.observed_landmark_id:
                 landmark = self.frontend.landmarks[landmark_id]
                 if use_smart_factor:
@@ -136,45 +132,25 @@ class GTSAM_Backend():
                             self.factors[landmark_id].estimated = estimated_point
                             error_gt = np.linalg.norm(gt_point-estimated_point)
                             count[2] += 1
-                        if factor.size() >= 2 and error/len(landmark.uv) < max_factor_error:
-                            count[4] += 1
                         # if frame_id==45 and factor.size()>=2:
-                        if factor.size() >= 2 and error > 0 and error/len(landmark.uv) < max_factor_error:
-                            # if frame_id==38:
-                            # self.frontend.show_matches('test', list(landmark.uv.keys()), [list(landmark.uv.values())], -1)
-                            #     print(landmark_id, end=', ')
-                            #     # factor.print()
-                            #     # factor.printPoint()
-                            # if error_gt>5:
-                            #     continue
-                            # if landmark_id in [4620,5148,4543]:
-                            #     continue
-                            # self.print('log', 'result: ',landmark_id, gt_point, estimated_point, error_gt, error/len(landmark.uv), len(landmark.uv))
-
+                        if factor.size() >= 2 and error > 0:
                             count[3] += 1
                             self.graph.push_back(factor)
                             for x in landmark.uv.keys():
                                 landmark_set.add(x)
-                            # factor.print()
-                            # self.print('debug', f'size: {factor.size()}, error: {error}, average error: {error/factor.size()}')
-                            # self.print('debug', '==========')
-                        # self.print('debug', f'added!')
                 else:
                     if landmark.frames[0] == frame_id:
                         initial_estimate.insert(
-                            L(landmark_id), gtsam.Point3(*landmark.xyz[frame_id]))
+                            L(landmark_id), gtsam.Point3(*landmark.gt_xyz[frame_id]))
                         self.graph.push_back(gtsam.PriorFactorPoint3(
                             L(landmark_id), gtsam.Point3(
-                                *landmark.xyz[frame_id]), landmark_prior_noise
+                                *landmark.gt_xyz[frame_id]), landmark_prior_noise
                         ))
                     self.graph.push_back(gtsam.GenericProjectionFactorCal3_S2(
-                        np.array(landmark.uv[frame_id]), uv_measurement_noise, X(
+                        np.array(landmark.gt_uv[frame_id]), uv_measurement_noise, X(
                             frame_id),
                         L(landmark_id), K, camera_pose
                     ))
-        # for i in range(landmark.frames[-1]+1):
-        #     if not i in landmark_set:
-        #         self.print('log', f'frame {i} has no measurement')
 
         # debug
         self.print('log', f'count: {count}')
@@ -347,12 +323,11 @@ if __name__ == '__main__':
     for i in range(300, 301, 1):  # 727
         print(f'===== FRAME LENGTH {i} =====')
         frontend.load_dataset(start=0, end=i)
-        frontend.calc_ground_truth_match()
         frontend.evaluate(viz_matches=False)
         backend.set_frontend(frontend)
         # backend.plot(0,True, 100, True, False, True)
         # plt.show(block=True)
-        backend.optimize(use_smart_factor=True, optimizer='LM', max_factor_error=3000, filter_iterations=1)
+        backend.optimize(use_smart_factor=True, optimizer='LM', max_factor_error=1000, filter_iterations=0)
         backend.evaluate()
         backend.save_estimated_traj(
             dataset_folder+'/pose_left_estimated.tum', dataset_folder+'/pose_left_gt.tum')
