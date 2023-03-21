@@ -192,6 +192,9 @@ class TartanAirLoader(DataLoaderBase):
     def load_ground_truth(self) -> None:
         self.gt = self._load_traj('tum', 'pose_left.txt', add_timestamps=True)
 
+    def set_ground_truth(self, traj) -> None:
+        self.gt = traj
+
     def load_odometry(self, traj=None) -> None:
         self.odom = self._load_traj(
             'tum', 'pose_left.txt', add_timestamps=True)

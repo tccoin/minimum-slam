@@ -1,7 +1,8 @@
 log/
 .vscode/
 test_data/
-
+data
+*tmp/
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]
