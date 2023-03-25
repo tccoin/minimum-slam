@@ -38,14 +38,11 @@ class Frontend():
             is_keyframe = True
         else:
             # Determine if the motion is large enough
-            rel_pose = self.curr_frame.odom_pose.inv() * odom_pose
+            rel_pose = self.curr_frame.odom_pose.inv() @ odom_pose
             w_trans = self.params['frontend']['keyframe']['trans_weight']
             w_rot = self.params['frontend']['keyframe']['rot_weight']
             weight = np.array([w_trans]*3+[w_rot]*3)
-            if rel_pose == np.eye(4):
-                diff = 0
-            else:
-                diff = np.linalg.norm(rel_pose.log(True) * weight)
+            diff = np.linalg.norm(rel_pose.log(True) * weight)
             threshold = self.params['frontend']['keyframe']['threshold']
             is_keyframe = diff > threshold
         return is_keyframe
@@ -117,30 +114,45 @@ class Frontend():
                     self.curr_frame.matches.append(cv2.DMatch(query_idx, train_idx, 0))
         else:
             raise NotImplementedError
+        self._reducePoints()
 
-    def eliminate_outliers(self):
+    def eliminate_outliers(self, ransacReprojThreshold=3):
         if len(self.curr_frame.matches)<8:
             return
         last_points = np.array([self.last_frame.points[match.queryIdx] for match in self.curr_frame.matches])
         curr_points = np.array([self.curr_frame.points[match.trainIdx] for match in self.curr_frame.matches])
-        retval, mask = cv2.findFundamentalMat(last_points, curr_points, cv2.FM_RANSAC, 3, 0.99, None)
+        retval, mask = cv2.findFundamentalMat(last_points, curr_points, cv2.FM_RANSAC, ransacReprojThreshold, 0.99, None)
         
         matches = []
         for i, is_inlier in enumerate(mask):
             if is_inlier:
                 matches.append(self.curr_frame.matches[i])
         self.curr_frame.matches = matches
+        self._reducePoints()
 
-    def plot_features(self):
+    def _reducePoints(self):
+        '''
+        Reduce points to the matched ones and update idx in matches
+        '''
+        points = []
+        for i, match in enumerate(self.curr_frame.matches):
+            points.append(self.curr_frame.points[match.trainIdx])
+            match.trainIdx = i
+        self.curr_frame.points = points
+
+    def plot_features(self, ax=None):
         canvas = np.array(self.curr_frame.color)
         for point in self.curr_frame.points:
             cv2.circle(canvas, (int(point[0]), int(
                 point[1])), 4, (255, 0, 0), 1)
-        plt.imshow(canvas[:, :, ::-1])
+        if ax is None:
+            ax = plt.gca()
+        ax.imshow(canvas[:, :, ::-1])
+        return canvas[:, :, ::-1]
 
-    def plot_matches(self, with_global_id=False):
+    def plot_matches(self, with_global_id=False, ax=None):
         if self.frame_id == 0:
-            self.plot_features()
+            return self.plot_features(ax=ax)
         else:
             canvas = np.concatenate([self.last_frame.color, self.curr_frame.color], axis=1)
             for match in self.curr_frame.matches:
@@ -158,7 +170,10 @@ class Frontend():
                     pt2[1] += 10
                     cv2.putText(canvas, str(self.last_frame.global_id[match.queryIdx]), pt1, cv2.FONT_HERSHEY_SIMPLEX, 0.9, (0, 255, 255))
                     cv2.putText(canvas, str(self.curr_frame.global_id[match.trainIdx]), pt2, cv2.FONT_HERSHEY_SIMPLEX, 0.9, (0, 255, 255))
-            plt.imshow(canvas[:, :, ::-1])
+            if ax is None:
+                ax = plt.gca()
+            ax.imshow(canvas[:, :, ::-1])
+            return canvas[:, :, ::-1]
     
     def assign_global_id(self):
         if self.frame_id == 0:
@@ -167,6 +182,11 @@ class Frontend():
             self.curr_frame.global_id = [-1 for i in range(len(self.curr_frame.points))]
             for match in self.curr_frame.matches:
                 self.curr_frame.global_id[match.trainIdx] = self.last_frame.global_id[match.queryIdx]
+            index = np.max(self.curr_frame.global_id) + 1
+            for i, global_id in enumerate(self.curr_frame.global_id):
+                if global_id == -1:
+                    self.curr_frame.global_id[i] = index
+                    index += 1
 
 
 if __name__ == '__main__':

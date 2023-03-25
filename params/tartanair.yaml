@@ -10,7 +10,7 @@ frontend:
   feature:
     detector: sift
     sample: vanilla
-    number: 1000
+    number: 300
   match:
     matcher: opticalflow # bruteforce opticalflow
     cross_check: true
