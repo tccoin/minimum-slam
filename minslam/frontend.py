@@ -1,21 +1,42 @@
 import numpy as np
-from spatialmath import *
+from spatialmath import SE3
 import cv2
 import matplotlib.pyplot as plt
+from dataclasses import dataclass, field
+from minslam.camera import PinholeCamera
 
+@dataclass
+class FrontendLandmark():
+    global_id: int = -1
+    measurements: dict[list[int]] = field(default_factory=dict) #[u, v, depth]
+    observed_frames: list[int] = field(default_factory=list)
+
+    def is_outlier_gt(self, frontend, threshold=0.1):
+        point_xyz_gt = [self.back_project(frontend, i) for i in self.observed_frames]
+        point_xyz_gt = np.array(point_xyz_gt)
+        error = np.abs((np.mean(point_xyz_gt, axis=0)-point_xyz_gt)).sum()/len(self.observed_frames)
+        return error>threshold
+    
+    def back_project(self, frontend, frame_id):
+        pose = frontend.frames[frame_id].odom_pose
+        camera = PinholeCamera(frontend.params)
+        measurement = self.measurements[frame_id]
+        points_xyz = camera.back_project(*measurement, pose).flatten()
+        return points_xyz
+
+@dataclass
 class FrontendKeyframe():
-    def __init__(self) -> None:
-        self.frame_id = -1
-        self.odom_pose = None
-        self.color = []
-        self.gray = []
-        self.depth = []
-        self.points = []
-        self.keypoints = []
-        self.descriptors = []
-        self.matches = []
-        self.global_id = []
-
+    frame_id: int = -1
+    odom_pose: SE3 = SE3()
+    color: np.ndarray = np.array([])
+    gray: np.ndarray = np.array([])
+    depth: np.ndarray = np.array([])
+    points: list[np.ndarray] = field(default_factory=list)
+    keypoints: list[cv2.KeyPoint] = field(default_factory=list)
+    descriptors: list[np.ndarray] = field(default_factory=list)
+    matches: list[cv2.DMatch] = field(default_factory=list)
+    global_id: list[int] = field(default_factory=list)
+    landmarks: list[FrontendLandmark] = field(default_factory=list)
 
 class Frontend():
     def __init__(self, params):
@@ -23,6 +44,8 @@ class Frontend():
         self.params = params
 
         # All states
+        self.frames = []
+        self.landmarks = {}
         self.last_frame = FrontendKeyframe()
         self.curr_frame = FrontendKeyframe()
         self.frame_id = -1
@@ -33,7 +56,7 @@ class Frontend():
         @return: True if a keyframe is selected
         '''
         is_keyframe = False
-        if self.curr_frame.odom_pose is None:
+        if self.frame_id == -1:
             # First frame
             is_keyframe = True
         else:
@@ -56,10 +79,12 @@ class Frontend():
         self.frame_id += 1
         self.last_frame = self.curr_frame
         self.curr_frame = FrontendKeyframe()
+        self.curr_frame.frame_id = self.frame_id
         self.curr_frame.odom_pose = odom_pose
         self.curr_frame.color = color
         self.curr_frame.gray = cv2.cvtColor(color, cv2.COLOR_BGR2GRAY)
         self.curr_frame.depth = depth
+        self.frames.append(self.curr_frame)
 
     def extract_features(self, n=None, detector_name=None, sample_method=None, append_mode=False) -> None:
         # select detector
@@ -67,6 +92,7 @@ class Frontend():
             n = self.params['frontend']['feature']['number']
         if detector_name is None:
             detector_name = self.params['frontend']['feature']['detector']
+        detector_name = detector_name.lower()
         if detector_name == 'sift':
             detector = cv2.SIFT_create(n)
         elif detector_name == 'orb':
@@ -75,12 +101,14 @@ class Frontend():
             detector = cv2.AKAZE_create()
 
         # todo: add sample methods
+        
         if sample_method is None:
-            sample_method = self.params['frontend']['feature']['sample']
-        if sample_method == 'vanilla':
+            sample_method = self.params['frontend']['feature']['sample']['method']
+        if sample_method == 'none':
             keypoints, descriptors = detector.detectAndCompute(
                 self.curr_frame.color, None)
         else:
+            print(sample_method)
             raise NotImplementedError
         if not append_mode:
             self.curr_frame.keypoints = keypoints
@@ -107,7 +135,7 @@ class Frontend():
             self.curr_frame.points = []
             self.curr_frame.matches = []
             for i, (point, is_inlier) in enumerate(zip(curr_points_all, status)):
-                if is_inlier:
+                if is_inlier and self._in_frame(point):
                     query_idx = i
                     train_idx = len(self.curr_frame.points)
                     self.curr_frame.points.append(point)
@@ -115,6 +143,10 @@ class Frontend():
         else:
             raise NotImplementedError
         self._reducePoints()
+    
+    def _in_frame(self, point):
+        h, w = self.curr_frame.color.shape[:2]
+        return 0 <= point[0] < w and 0 <= point[1] < h
 
     def eliminate_outliers(self, ransacReprojThreshold=3):
         if len(self.curr_frame.matches)<8:
@@ -187,6 +219,18 @@ class Frontend():
                 if global_id == -1:
                     self.curr_frame.global_id[i] = index
                     index += 1
+        for global_id, point in zip(self.curr_frame.global_id, self.curr_frame.points):
+            if global_id in self.landmarks:
+                landmark = self.landmarks[global_id]
+            else:
+                landmark = FrontendLandmark()
+                landmark.global_id = global_id
+                self.landmarks[global_id] = landmark
+            depth = self.curr_frame.depth[int(point[1]), int(point[0])]
+            measurement = [*point, depth]
+            landmark.observed_frames.append(self.frame_id)
+            landmark.measurements[self.frame_id] = measurement
+            self.curr_frame.landmarks.append(landmark)
 
 
 if __name__ == '__main__':
