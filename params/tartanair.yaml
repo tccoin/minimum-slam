@@ -2,7 +2,7 @@ frontend:
   keyframe:
     rot_weight: 1
     trans_weight: 1
-    threshold: 0.2
+    threshold: 0.1
   feature:
     detector: SIFT # ORB, SURF, SIFT, KAZE, AKAZE, BEBLID
     number: 300

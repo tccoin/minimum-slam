@@ -42,7 +42,6 @@ class Backend():
         fx, fy, cx, cy = self.camera.camera_matrix
         K = gtsam.Cal3_S2(fx, fy, 0.0, cx, cy)
         pose_gtsam = gtsam.Pose3(gtsam.Rot3(pose.R),gtsam.Point3(pose.t))
-        body_T_sensor = gtsam.Pose3(gtsam.Rot3(self.camera.body_T_cam.R),gtsam.Point3(self.camera.body_T_cam.t))
 
         # add initial estimate for pose
         self.initial_estimate.insert(X(frame_id), pose_gtsam)
@@ -74,12 +73,16 @@ class Backend():
                 if smart_factor is None:
                     noise = self.params['backend']['smart_projection_factor']['noise']
                     noise_model = gtsam.noiseModel.Isotropic.Sigma(2, noise)
-                    smart_factor = gtsam.SmartProjectionPose3Factor(noise_model, K, body_T_sensor, self.smart_factor_params)
+                    smart_factor = gtsam.SmartProjectionPose3Factor(noise_model, K, self.smart_factor_params)
                     self.factors[global_id].smart_factor = smart_factor
                 smart_factor.add(np.array([u, v]), X(frame_id))
                 if smart_factor.size()>1:
-                    print('add smart factor for frame ', frame_id, ' and landmark ', global_id)
+                    # print('add smart factor to graph, frame=', frame_id, ', landmark=', global_id)
                     self.graph.push_back(smart_factor)
+                    # point = self.camera.back_project(u,v, depth,pose)
+                    # print('camera.back_project: ', point.flatten(), ', depth=',depth)
+                    smart_factor.error(self.initial_estimate)
+                    # smart_factor.print()
 
             # add generic factor
             if self.params['backend']['generic_projection_factor']['enabled']:
@@ -91,7 +94,7 @@ class Backend():
                 noise_model = gtsam.noiseModel.Isotropic.Sigma(2, noise)
                 noise_model_robust = gtsam.noiseModel.Robust.Create(gtsam.noiseModel.mEstimator.Huber.Create(1.345), noise_model)
                 generic_factors.append(gtsam.GenericProjectionFactorCal3_S2(
-                    np.array([u, v]), noise_model_robust, X(frame_id), L(global_id), K, body_T_sensor
+                    np.array([u, v]), noise_model_robust, X(frame_id), L(global_id), K
                 ))
                 if len(generic_factors) == 2:
                     for generic_factor in generic_factors:

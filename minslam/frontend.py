@@ -27,6 +27,7 @@ class FrontendLandmark():
 @dataclass
 class FrontendKeyframe():
     frame_id: int = -1
+    seq_id: int = -1
     odom_pose: SE3 = SE3()
     color: np.ndarray = np.array([])
     gray: np.ndarray = np.array([])
@@ -70,7 +71,7 @@ class Frontend():
             is_keyframe = diff > threshold
         return is_keyframe
 
-    def add_keyframe(self, odom_pose, color, depth) -> None:
+    def add_keyframe(self, odom_pose, color, depth, seq_id=-1) -> None:
         '''
         @param odom_pose: current pose
         @param color: current color image
@@ -80,6 +81,7 @@ class Frontend():
         self.last_frame = self.curr_frame
         self.curr_frame = FrontendKeyframe()
         self.curr_frame.frame_id = self.frame_id
+        self.curr_frame.seq_id = seq_id
         self.curr_frame.odom_pose = odom_pose
         self.curr_frame.color = color
         self.curr_frame.gray = cv2.cvtColor(color, cv2.COLOR_BGR2GRAY)

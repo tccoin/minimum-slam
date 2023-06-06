@@ -32,8 +32,7 @@ class PinholeCamera():
         @return: 2D point in the image plane
         '''
         fx, fy, cx, cy = self.camera_matrix
-        point0 = body_pose.inv() * point
-        point1 = self.body_T_cam.inv() * point0
+        point1 = body_pose.inv() * point
         d = point1[2]
         u = point1[0]*fx/d + cx
         v = point1[1]*fy/d + cy
@@ -53,9 +52,8 @@ class PinholeCamera():
                     (v-cy)*depth/fy,
                     depth
                 ])
-        point1 = self.body_T_cam * point0
-        point2 = body_pose * point1
-        return point2
+        point1 = body_pose * point0
+        return point1
     
     def back_project2(self, u, v, depth):
         '''

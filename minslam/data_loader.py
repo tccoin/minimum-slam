@@ -190,7 +190,16 @@ class TartanAirLoader(DataLoaderBase):
         return self.odom[self.curr_index]
 
     def load_ground_truth(self) -> None:
-        self.gt = self._load_traj('tum', 'pose_left.txt', add_timestamps=True)
+        poses = self._load_traj('tum', 'pose_left.txt', add_timestamps=True)
+        T = np.array([[0,1,0,0],
+                        [0,0,1,0],
+                        [1,0,0,0],
+                        [0,0,0,1]], dtype=np.float32) 
+        T_inv = np.linalg.inv(T)
+        gt = []
+        for t in poses.data:
+            gt.append(SE3(T.dot(t).dot(T_inv)))
+        self.gt = SE3(gt)
 
     def set_ground_truth(self, traj) -> None:
         self.gt = traj
