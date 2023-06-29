@@ -1,9 +1,10 @@
 import numpy as np
 from spatialmath import SE3
 import cv2
-import matplotlib.pyplot as plt
 from dataclasses import dataclass, field
 from minslam.camera import PinholeCamera
+import plotly.express as px
+import plotly.graph_objects as go
 
 @dataclass
 class FrontendLandmark():
@@ -43,6 +44,7 @@ class Frontend():
     def __init__(self, params):
         # Parameters
         self.params = params
+        self.camera = PinholeCamera(params)
 
         # All states
         self.frames = []
@@ -144,25 +146,41 @@ class Frontend():
                     self.curr_frame.matches.append(cv2.DMatch(query_idx, train_idx, 0))
         else:
             raise NotImplementedError
-        self._reducePoints()
     
     def _in_frame(self, point):
         h, w = self.curr_frame.color.shape[:2]
         return 0 <= point[0] < w and 0 <= point[1] < h
 
     def eliminate_outliers(self, ransacReprojThreshold=3):
-        if len(self.curr_frame.matches)<8:
-            return
-        last_points = np.array([self.last_frame.points[match.queryIdx] for match in self.curr_frame.matches])
-        curr_points = np.array([self.curr_frame.points[match.trainIdx] for match in self.curr_frame.matches])
-        retval, mask = cv2.findFundamentalMat(last_points, curr_points, cv2.FM_RANSAC, ransacReprojThreshold, 0.99, None)
-        
-        matches = []
-        for i, is_inlier in enumerate(mask):
-            if is_inlier:
-                matches.append(self.curr_frame.matches[i])
+        if self.params['frontend']['ransac']['method'] == 'fundamental':
+            if len(self.curr_frame.matches)<8:
+                return
+            last_points = np.array([self.last_frame.points[match.queryIdx] for match in self.curr_frame.matches])
+            curr_points = np.array([self.curr_frame.points[match.trainIdx] for match in self.curr_frame.matches])
+            retval, mask = cv2.findFundamentalMat(last_points, curr_points, cv2.FM_RANSAC, ransacReprojThreshold, 0.99, None)
+            matches = []
+            for i, is_inlier in enumerate(mask):
+                if is_inlier:
+                    matches.append(self.curr_frame.matches[i])
+        elif self.params['frontend']['ransac']['method'] == 'pnp':
+            model_points = np.array([self.last_frame.points[match.queryIdx] for match in self.curr_frame.matches])
+            image_points = np.array([self.curr_frame.points[match.trainIdx] for match in self.curr_frame.matches])
+            last_depth = np.array([self.last_frame.depth[int(p[1]), int(p[0])] for p in model_points])
+            last_measurements = [(*z, d) for z, d in zip(model_points, last_depth)]
+            pose = self.curr_frame.odom_pose
+            fx, fy, cx, cy = self.camera.camera_matrix
+            K = np.array([[fx, 0, cx], [0, fy, cy], [0, 0, 1]])
+            model_points_3d = np.array([self.camera.back_project2(*m).flatten() for m in last_measurements])
+            success, rot, trans, inliers = cv2.solvePnPRansac(model_points_3d, image_points, K, None, None, None, False, 1000, 1, 0.99)
+            if not success:
+                return
+            self.ransac_r = cv2.Rodrigues(rot)[0]
+            self.ransac_t = trans
+            matches = []
+            for i in inliers:
+                matches.append(self.curr_frame.matches[int(i)])
         self.curr_frame.matches = matches
-        self._reducePoints()
+
 
     def _reducePoints(self):
         '''
@@ -174,40 +192,73 @@ class Frontend():
             match.trainIdx = i
         self.curr_frame.points = points
 
-    def plot_features(self, ax=None):
-        canvas = np.array(self.curr_frame.color)
-        for point in self.curr_frame.points:
-            cv2.circle(canvas, (int(point[0]), int(
-                point[1])), 4, (255, 0, 0), 1)
-        if ax is None:
-            ax = plt.gca()
-        ax.imshow(canvas[:, :, ::-1])
-        return canvas[:, :, ::-1]
+    def plot_features(self, fig=None, plot_id=True):
+        if fig is None:
+            fig = px.imshow(self.curr_frame.color)
+        marker = {'symbol':'circle-open', 'color': 'yellow'}
+        data_x = []
+        data_y = []
+        data_text = []
+        for i, keypoint in enumerate(self.curr_frame.keypoints):
+            data_x.append(int(keypoint.pt[0]))
+            data_y.append(int(keypoint.pt[1]))
+            if plot_id:
+                data_text.append(f'global_id: {self.curr_frame.global_id[i]}')
+        fig.add_trace(go.Scatter(
+            x=data_x,
+            y=data_y,
+            mode="markers",
+            name="features",
+            marker=marker,
+            text=data_text if plot_id else None
+        ))
+        return fig
 
-    def plot_matches(self, with_global_id=False, ax=None):
+    def plot_matches(self, fig=None, plot_id=True):
         if self.frame_id == 0:
-            return self.plot_features(ax=ax)
-        else:
-            canvas = np.concatenate([self.last_frame.color, self.curr_frame.color], axis=1)
-            for match in self.curr_frame.matches:
-                pt1 = [int(x) for x in self.last_frame.points[match.queryIdx]]
-                pt2 = [int(x) for x in self.curr_frame.points[match.trainIdx]]
-                pt2[0] += self.last_frame.color.shape[1]
-                cv2.circle(canvas, pt1, 4, (255, 0, 0), 1)
-                cv2.circle(canvas, pt2, 4, (255, 0, 0), 1)
-                cv2.line(canvas, (int(pt1[0]), int(pt1[1])), (int(
-                    pt2[0]), int(pt2[1])), (255, 0, 0), 1)
-                if with_global_id:
-                    pt1[0] += 10
-                    pt1[1] += 10
-                    pt1[0] += 10
-                    pt2[1] += 10
-                    cv2.putText(canvas, str(self.last_frame.global_id[match.queryIdx]), pt1, cv2.FONT_HERSHEY_SIMPLEX, 0.9, (0, 255, 255))
-                    cv2.putText(canvas, str(self.curr_frame.global_id[match.trainIdx]), pt2, cv2.FONT_HERSHEY_SIMPLEX, 0.9, (0, 255, 255))
-            if ax is None:
-                ax = plt.gca()
-            ax.imshow(canvas[:, :, ::-1])
-            return canvas[:, :, ::-1]
+            return self.plot_features(plot_id=plot_id)
+        # else
+        canvas = np.concatenate([self.last_frame.color, self.curr_frame.color], axis=1)
+        marker = {'symbol':'circle-open', 'color': 'yellow'}
+        line = {'color': 'blue'}
+        if fig is None:
+            fig = px.imshow(canvas)
+        data_x1 = []
+        data_y1 = []
+        data_x2 = []
+        data_y2 = []
+        data_text_feature = []
+        data_text_match = []
+        for i, match in enumerate(self.curr_frame.matches):
+            pt1 = self.last_frame.points[match.queryIdx]
+            pt2 = self.curr_frame.points[match.trainIdx]
+            data_x1.append(int(pt1[0]))
+            data_y1.append(int(pt1[1]))
+            data_x2.append(int(pt2[0])+self.last_frame.color.shape[1])
+            data_y2.append(int(pt2[1]))
+            data_text_match.append(f'match_index: {i}')
+            if plot_id:
+                data_text_feature.append(f'global_id: {self.curr_frame.global_id[match.trainIdx]}')
+        fig.add_traces([go.Scatter(
+            x=[x1, x2],
+            y=[y1, y2],
+            mode='lines',
+            opacity=0.3,
+            line=line,
+            legendgroup="matches",
+            name='matches',
+            text=data_text_match
+        ) for x1, x2, y1, y2 in zip(data_x1, data_x2, data_y1, data_y2)])
+        fig.add_trace(go.Scatter(
+            x=data_x1+data_x2,
+            y=data_y1+data_y2,
+            mode="markers",
+            name="features",
+            legendgroup="features",
+            marker=marker,
+            text=data_text_feature*2 if plot_id else None
+        ))
+        return fig
     
     def assign_global_id(self):
         if self.frame_id == 0:

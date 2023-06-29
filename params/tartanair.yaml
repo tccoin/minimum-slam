@@ -11,11 +11,11 @@ frontend:
       grid: 10
       number: 200
   match:
-    matcher: opticalflow # opticalflow, bruteforce
+    matcher: bruteforce # opticalflow, bruteforce
     match_range: 5
     cross_check: true
   ransac:
-    method: fundamental # fundamental, pnp
+    method: pnp # fundamental, pnp
     error_threshold: 3
     iterations: 500
   search:

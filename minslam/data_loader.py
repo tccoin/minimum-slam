@@ -3,6 +3,7 @@ import numpy as np
 import cv2
 from evo.tools import file_interface
 from spatialmath import *
+import plotly.graph_objects as go
 
 
 class DataLoaderBase():
@@ -115,7 +116,7 @@ class DataLoaderBase():
         else:
             return True
 
-    def add_noise(self, traj, mean_sigma=[2e-4, 2e-4], sigma=[1e-3, 1e-3], seed=None) -> SE3:
+    def add_noise(self, traj, mean_sigma=[2e-4, 2e-4], sigma=[1e-3, 1e-3], seed=None, start=0) -> SE3:
         '''
         add noise to the trajectory
         @param traj: SE3
@@ -132,15 +133,11 @@ class DataLoaderBase():
         noise = SE3()
         noise_t_bias = SE3.Trans(np.random.normal(0, mean_sigma[0], 3))
         noise_r_bias = SE3.RPY(*np.random.normal(0, mean_sigma[1], 3))
-        for i in range(1, len(traj)):
+        for i in range(start+1, len(traj)):
             noise_t_delta = SE3.Trans(
                 np.random.normal(0, sigma[0], 3)) * noise_t_bias
             noise_r_delta = SE3.RPY(
                 *np.random.normal(0, sigma[1], 3)) * noise_r_bias
-            # print(new_traj[i])
-            # print(noise_t_bias * noise_t_delta * new_traj[i])
-            # print((noise_r_bias * noise_r_delta)
-            #       * (noise_t_bias * noise_t_delta * new_traj[i]))
             noise = noise_r_delta * noise_t_delta * noise
             new_pose = noise * new_traj[i]
             new_traj[i] = new_pose
@@ -220,3 +217,16 @@ def load_dataset(params):
         )
     else:
         raise NotImplementedError
+
+def plot_trajectory(trajectory, legend_name='trajectory', fig=None):
+    if fig is None:
+        fig = go.Figure()
+    trajectory = np.array(trajectory)
+    X, Y, Z = trajectory[:, 0], trajectory[:, 1], trajectory[:, 2]
+    fig.add_trace(go.Scatter3d(x=X, y=Y, z=Z, mode='lines', name=legend_name))
+    fig.update_layout(
+        margin=dict(r=20, l=10, b=10, t=10),
+        legend=dict(y=0.5, traceorder='reversed', font_size=16),
+        autosize=True,
+    )
+    return fig
