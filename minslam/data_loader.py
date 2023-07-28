@@ -18,7 +18,6 @@ class DataLoaderBase():
         self.index_interval = 1
         self.end_index = -1
         self.camera = [0, 0, 0, 0]  # fx, fy, cx, cy
-        self.pose_odom_cam = np.eye(4)  # p_odom = T_cam_odom * p_cam
         self.image_size = (0, 0)  # width, height
 
     def read_current_rgbd(self) -> tuple[np.ndarray, np.ndarray]:
@@ -156,12 +155,6 @@ class TartanAirLoader(DataLoaderBase):
         self.gt_filename = 'pose_left.txt'
         self.odom_filename = 'pose_left.txt'
         self.camera = [320, 320, 320, 240]  # fx, fy, cx, cy
-        self.pose_odom_cam = np.array([
-            [0, 0, 1, 0],
-            [1, 0, 0, 0],
-            [0, 1, 0, 0],
-            [0, 0, 0, 1]
-        ])  # p_odom = T_odom_cam * p_cam
         self.image_size = (640, 480)  # width, height
 
     def read_current_rgbd(self) -> tuple[np.ndarray, np.ndarray]:
