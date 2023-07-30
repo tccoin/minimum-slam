@@ -5,6 +5,20 @@ from dataclasses import dataclass, field
 from minslam.camera import PinholeCamera
 import plotly.express as px
 import plotly.graph_objects as go
+import matplotlib.pyplot as plt
+
+
+def is_notebook() -> bool:
+    try:
+        shell = get_ipython().__class__.__name__
+        if shell == 'ZMQInteractiveShell':
+            return True   # Jupyter notebook or qtconsole
+        elif shell == 'TerminalInteractiveShell':
+            return False  # Terminal running IPython
+        else:
+            return False  # Other type (?)
+    except NameError:
+        return False      # Probably standard Python interpreter
 
 @dataclass
 class FrontendLandmark():
@@ -29,10 +43,10 @@ class FrontendLandmark():
 class FrontendKeyframe():
     frame_id: int = -1
     seq_id: int = -1
-    odom_pose: SE3 = SE3()
-    color: np.ndarray = np.array([])
-    gray: np.ndarray = np.array([])
-    depth: np.ndarray = np.array([])
+    odom_pose: SE3 = field(default_factory=SE3)
+    color: np.ndarray = np.ndarray
+    gray: np.ndarray = np.ndarray
+    depth: np.ndarray = np.ndarray
     points: list[np.ndarray] = field(default_factory=list)
     keypoints: list[cv2.KeyPoint] = field(default_factory=list)
     descriptors: list[np.ndarray] = field(default_factory=list)
@@ -193,72 +207,103 @@ class Frontend():
         self.curr_frame.points = points
 
     def plot_features(self, fig=None, plot_id=True):
-        if fig is None:
-            fig = px.imshow(self.curr_frame.color)
-        marker = {'symbol':'circle-open', 'color': 'yellow'}
-        data_x = []
-        data_y = []
-        data_text = []
-        for i, keypoint in enumerate(self.curr_frame.keypoints):
-            data_x.append(int(keypoint.pt[0]))
-            data_y.append(int(keypoint.pt[1]))
-            if plot_id:
-                data_text.append(f'global_id: {self.curr_frame.global_id[i]}')
-        fig.add_trace(go.Scatter(
-            x=data_x,
-            y=data_y,
-            mode="markers",
-            name="features",
-            marker=marker,
-            text=data_text if plot_id else None
-        ))
-        return fig
+        if is_notebook():
+            if fig is None:
+                fig = px.imshow(self.curr_frame.color)
+            marker = {'symbol':'circle-open', 'color': 'yellow'}
+            data_x = []
+            data_y = []
+            data_text = []
+            for i, keypoint in enumerate(self.curr_frame.keypoints):
+                data_x.append(int(keypoint.pt[0]))
+                data_y.append(int(keypoint.pt[1]))
+                if plot_id:
+                    data_text.append(f'global_id: {self.curr_frame.global_id[i]}')
+            fig.add_trace(go.Scatter(
+                x=data_x,
+                y=data_y,
+                mode="markers",
+                name="features",
+                marker=marker,
+                text=data_text if plot_id else None
+            ))
+            return fig
+        else:
+            canvas = np.array(self.curr_frame.color)
+            for point in self.curr_frame.points:
+                cv2.circle(canvas, (int(point[0]), int(
+                    point[1])), 4, (255, 0, 0), 1)
+            if fig is None:
+                fig = plt.figure()
+            plt.imshow(canvas[:, :, ::-1])
+            return fig
 
     def plot_matches(self, fig=None, plot_id=True):
         if self.frame_id == 0:
-            return self.plot_features(plot_id=plot_id)
-        # else
-        canvas = np.concatenate([self.last_frame.color, self.curr_frame.color], axis=1)
-        marker = {'symbol':'circle-open', 'color': 'yellow'}
-        line = {'color': 'blue'}
-        if fig is None:
-            fig = px.imshow(canvas)
-        data_x1 = []
-        data_y1 = []
-        data_x2 = []
-        data_y2 = []
-        data_text_feature = []
-        data_text_match = []
-        for i, match in enumerate(self.curr_frame.matches):
-            pt1 = self.last_frame.points[match.queryIdx]
-            pt2 = self.curr_frame.points[match.trainIdx]
-            data_x1.append(int(pt1[0]))
-            data_y1.append(int(pt1[1]))
-            data_x2.append(int(pt2[0])+self.last_frame.color.shape[1])
-            data_y2.append(int(pt2[1]))
-            data_text_match.append(f'match_index: {i}')
-            if plot_id:
-                data_text_feature.append(f'global_id: {self.curr_frame.global_id[match.trainIdx]}')
-        fig.add_traces([go.Scatter(
-            x=[x1, x2],
-            y=[y1, y2],
-            mode='lines',
-            opacity=0.3,
-            line=line,
-            legendgroup="matches",
-            name='matches',
-            text=data_text_match
-        ) for x1, x2, y1, y2 in zip(data_x1, data_x2, data_y1, data_y2)])
-        fig.add_trace(go.Scatter(
-            x=data_x1+data_x2,
-            y=data_y1+data_y2,
-            mode="markers",
-            name="features",
-            legendgroup="features",
-            marker=marker,
-            text=data_text_feature*2 if plot_id else None
-        ))
-        return fig
+            return self.plot_features(fig=fig, plot_id=plot_id)
+        if is_notebook():
+            canvas = np.concatenate([self.last_frame.color, self.curr_frame.color], axis=1)
+            marker = {'symbol':'circle-open', 'color': 'yellow'}
+            line = {'color': 'blue'}
+            if fig is None:
+                fig = px.imshow(canvas)
+            data_x1 = []
+            data_y1 = []
+            data_x2 = []
+            data_y2 = []
+            data_text_feature = []
+            data_text_match = []
+            for i, match in enumerate(self.curr_frame.matches):
+                pt1 = self.last_frame.points[match.queryIdx]
+                pt2 = self.curr_frame.points[match.trainIdx]
+                data_x1.append(int(pt1[0]))
+                data_y1.append(int(pt1[1]))
+                data_x2.append(int(pt2[0])+self.last_frame.color.shape[1])
+                data_y2.append(int(pt2[1]))
+                data_text_match.append(f'match_index: {i}')
+                if plot_id:
+                    data_text_feature.append(f'global_id: {self.curr_frame.global_id[match.trainIdx]}')
+            fig.add_traces([go.Scatter(
+                x=[x1, x2],
+                y=[y1, y2],
+                mode='lines',
+                opacity=0.3,
+                line=line,
+                legendgroup="matches",
+                name='matches',
+                text=data_text_match
+            ) for x1, x2, y1, y2 in zip(data_x1, data_x2, data_y1, data_y2)])
+            fig.add_trace(go.Scatter(
+                x=data_x1+data_x2,
+                y=data_y1+data_y2,
+                mode="markers",
+                name="features",
+                legendgroup="features",
+                marker=marker,
+                text=data_text_feature*2 if plot_id else None
+            ))
+            return fig
+        else:
+            canvas = np.concatenate([self.last_frame.color, self.curr_frame.color], axis=1)
+            for match in self.curr_frame.matches:
+                pt1 = [int(x) for x in self.last_frame.points[match.queryIdx]]
+                pt2 = [int(x) for x in self.curr_frame.points[match.trainIdx]]
+                pt2[0] += self.last_frame.color.shape[1]
+                cv2.circle(canvas, pt1, 4, (255, 0, 0), 1)
+                cv2.circle(canvas, pt2, 4, (255, 0, 0), 1)
+                cv2.line(canvas, (int(pt1[0]), int(pt1[1])), (int(
+                    pt2[0]), int(pt2[1])), (255, 0, 0), 1)
+                if plot_id:
+                    pt1[0] += 10
+                    pt1[1] += 10
+                    pt1[0] += 10
+                    pt2[1] += 10
+                    cv2.putText(canvas, str(self.last_frame.global_id[match.queryIdx]), pt1, cv2.FONT_HERSHEY_SIMPLEX, 0.9, (0, 255, 255))
+                    cv2.putText(canvas, str(self.curr_frame.global_id[match.trainIdx]), pt2, cv2.FONT_HERSHEY_SIMPLEX, 0.9, (0, 255, 255))
+            if fig is None:
+                fig = plt.figure()
+            plt.imshow(canvas[:, :, ::-1])
+            return fig
     
     def assign_global_id(self):
         if self.frame_id == 0:
@@ -287,6 +332,7 @@ class Frontend():
 
 
 if __name__ == '__main__':
+    print(is_notebook())
     frontend = Frontend('./params/tartanair.yaml')
     new_pose = SE3()
     frontend.keyframe_selection(new_pose)
