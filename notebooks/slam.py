@@ -1,7 +1,8 @@
-import plotly.graph_objects as go
 import numpy as np
 import gtsam
-
+import matplotlib
+matplotlib.use('GTK4Agg')
+import matplotlib.pyplot as plt
 
 from minslam.data_loader import TartanAirLoader, plot_trajectory
 from minslam.frontend import Frontend
@@ -9,16 +10,8 @@ from minslam.params import Params
 from minslam.backend import Backend
 from minslam.camera import PinholeCamera
 
+fig = plt.figure()
 
-# plot the results
-fig = go.Figure()
-# plot_trajectory(odom_traj[:n_keyframes], 'odom', fig)
-# plot_trajectory(gt_traj[:n_keyframes], 'gt', fig)
-# plot_trajectory(estimated_traj[:n_keyframes], 'estimated', fig)
-fig.show()
-
-
-# define frontend
 def run_frontend_once(frontend):
     pose = dataset.read_current_ground_truth()
     while not frontend.keyframe_selection(pose):
@@ -36,13 +29,16 @@ def run_frontend_once(frontend):
         print('matching features:', len(frontend.curr_frame.matches))
         frontend.eliminate_outliers()
     frontend.assign_global_id()
+    fig.clf()
+    frontend.plot_matches(fig)
+    plt.show()
     return frontend.curr_frame
 
 # load the dataset
-params = Params('../params/tartanair.yaml')
+params = Params('./params/tartanair.yaml')
 frontend = Frontend(params)
 backend = Backend(params)
-dataset = TartanAirLoader('../data/P006/')
+dataset = TartanAirLoader('./data/P006/')
 start_index = 0
 dataset.set_curr_index(start_index)
 n_keyframes = 10
@@ -75,4 +71,13 @@ for i in range(n_keyframes):
 # optimize the backend
 backend.optimize(optimizer='LM')
 backend_estimate = backend.current_estimate
-# estimated_traj = gtsam.utilities.extractPose3(backend_estimate)[:, -3:]
+estimated_traj = gtsam.utilities.extractPose3(backend_estimate)[:, -3:]
+
+# plot the results
+fig = plt.figure()
+ax = plt.axes(projection='3d')
+ax.plot(odom_traj[:n_keyframes,0],odom_traj[:n_keyframes,1],odom_traj[:n_keyframes,2], '--', label='odom')
+ax.plot(gt_traj[:n_keyframes,0],gt_traj[:n_keyframes,1],gt_traj[:n_keyframes,2], '--', label='gt')
+ax.plot(estimated_traj[:n_keyframes,0],estimated_traj[:n_keyframes,1], estimated_traj[:n_keyframes,2], label='estimated')
+ax.legend()
+plt.show()
