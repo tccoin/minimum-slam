@@ -8,7 +8,6 @@ from minslam.data_loader import TartanAirLoader, plot_trajectory
 from minslam.frontend import Frontend
 from minslam.params import Params
 from minslam.backend import Backend
-from minslam.camera import PinholeCamera
 
 fig = plt.figure()
 

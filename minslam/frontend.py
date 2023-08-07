@@ -214,9 +214,9 @@ class Frontend():
             data_x = []
             data_y = []
             data_text = []
-            for i, keypoint in enumerate(self.curr_frame.keypoints):
-                data_x.append(int(keypoint.pt[0]))
-                data_y.append(int(keypoint.pt[1]))
+            for i, point in enumerate(self.curr_frame.points):
+                data_x.append(int(point[0]))
+                data_y.append(int(point[1]))
                 if plot_id:
                     data_text.append(f'global_id: {self.curr_frame.global_id[i]}')
             fig.add_trace(go.Scatter(
