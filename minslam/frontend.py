@@ -6,6 +6,7 @@ from minslam.camera import PinholeCamera
 import plotly.express as px
 import plotly.graph_objects as go
 import matplotlib.pyplot as plt
+from typing import Dict, List
 
 
 def is_notebook() -> bool:
@@ -23,8 +24,8 @@ def is_notebook() -> bool:
 @dataclass
 class FrontendLandmark():
     global_id: int = -1
-    measurements: dict[list[int]] = field(default_factory=dict) #[u, v, depth]
-    observed_frames: list[int] = field(default_factory=list)
+    measurements: Dict = field(default_factory=dict) #[u, v, depth]
+    observed_frames: List[int] = field(default_factory=list)
 
     def is_outlier_gt(self, frontend, threshold=0.1):
         point_xyz_gt = [self.back_project(frontend, i) for i in self.observed_frames]
@@ -47,12 +48,12 @@ class FrontendKeyframe():
     color: np.ndarray = np.ndarray
     gray: np.ndarray = np.ndarray
     depth: np.ndarray = np.ndarray
-    points: list[np.ndarray] = field(default_factory=list)
-    keypoints: list[cv2.KeyPoint] = field(default_factory=list)
-    descriptors: list[np.ndarray] = field(default_factory=list)
-    matches: list[cv2.DMatch] = field(default_factory=list)
-    global_id: list[int] = field(default_factory=list)
-    landmarks: list[FrontendLandmark] = field(default_factory=list)
+    points: List[np.ndarray] = field(default_factory=list)
+    keypoints: List[cv2.KeyPoint] = field(default_factory=list)
+    descriptors: List[np.ndarray] = field(default_factory=list)
+    matches: List[cv2.DMatch] = field(default_factory=list)
+    global_id: List[int] = field(default_factory=list)
+    landmarks: List[FrontendLandmark] = field(default_factory=list)
 
 class Frontend():
     def __init__(self, params):

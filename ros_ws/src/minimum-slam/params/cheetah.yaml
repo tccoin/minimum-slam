@@ -1,0 +1,46 @@
+frontend:
+  keyframe:
+    rot_weight: 1
+    trans_weight: 1
+    threshold: 0.1
+  feature:
+    detector: SIFT # ORB, SURF, SIFT, KAZE, AKAZE, BEBLID
+    number: 300
+    sample:
+      method: none # none, sample, patch
+      grid: 10
+      number: 200
+  match:
+    matcher: bruteforce # opticalflow, bruteforce
+    match_range: 5
+    cross_check: true
+  ransac:
+    method: pnp # fundamental, pnp
+    error_threshold: 3
+    iterations: 500
+  search:
+    frame_number: 10000
+    max_score: 0 # disabled
+  debug:
+    time_it: false
+    debug_flag: 0
+
+dataset:
+  type: tartanair
+  depth_folder: depth_left
+  image_width: 640
+  image_height: 480
+  camera_matrix: 383.141 382.908 318.244 246.717
+  body_T_cam: 0 0 1 1 0 0 0 1 0 0 0 0
+
+backend:
+  smart_projection_factor:
+    enabled: false
+    noise: 1
+    error_threshold: 1000
+  generic_projection_factor:
+    enabled: true
+    noise: 1
+  pose_prior:
+    sigma_rotation: 0.001
+    sigma_translation: 0.001

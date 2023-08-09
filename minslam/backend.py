@@ -6,13 +6,14 @@ from dataclasses import dataclass, field
 import gtsam
 from gtsam.symbol_shorthand import L, X
 from minslam.camera import PinholeCamera
+from typing import Dict, List
 
 @dataclass
 class ProjectionFactor:
     global_id: int = -1
     smart_factor: gtsam.SmartProjectionPose3Factor = None
-    generic_factors: list[gtsam.GenericProjectionFactorCal3_S2] = field(default_factory=list)
-    measurements: dict[int, list[float]] = field(default_factory=dict)
+    generic_factors: List[gtsam.GenericProjectionFactorCal3_S2] = field(default_factory=list)
+    measurements: Dict[int, List[float]] = field(default_factory=dict)
 
 class Backend():
     def __init__(self, params):

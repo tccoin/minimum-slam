@@ -4,7 +4,7 @@ import cv2
 from evo.tools import file_interface
 from spatialmath import *
 import plotly.graph_objects as go
-
+from typing import Tuple
 
 class DataLoaderBase():
     def __init__(self, dataset_folder):
@@ -20,10 +20,10 @@ class DataLoaderBase():
         self.camera = [0, 0, 0, 0]  # fx, fy, cx, cy
         self.image_size = (0, 0)  # width, height
 
-    def read_current_rgbd(self) -> tuple[np.ndarray, np.ndarray]:
+    def read_current_rgbd(self) -> Tuple[np.ndarray, np.ndarray]:
         raise NotImplementedError()
 
-    def read_current_stereo(self) -> tuple[np.ndarray, np.ndarray]:
+    def read_current_stereo(self) -> Tuple[np.ndarray, np.ndarray]:
         raise NotImplementedError()
 
     def read_current_ground_truth(self) -> SE3:
@@ -157,7 +157,7 @@ class TartanAirLoader(DataLoaderBase):
         self.camera = [320, 320, 320, 240]  # fx, fy, cx, cy
         self.image_size = (640, 480)  # width, height
 
-    def read_current_rgbd(self) -> tuple[np.ndarray, np.ndarray]:
+    def read_current_rgbd(self) -> Tuple[np.ndarray, np.ndarray]:
         index_str = super()._zeros(6, self.curr_index)
         left_color = cv2.imread(
             f'{self.dataset_folder}{self.stereo_folders[0]}{index_str}_left.png')
@@ -165,7 +165,7 @@ class TartanAirLoader(DataLoaderBase):
             f'{self.dataset_folder}{self.depth_folder}{index_str}_left_depth.npy')
         return (left_color, left_depth)
 
-    def read_current_stereo(self) -> tuple[np.ndarray, np.ndarray]:
+    def read_current_stereo(self) -> Tuple[np.ndarray, np.ndarray]:
         index_str = self._zeros(6, self.curr_index)
         left_color = cv2.imread(
             f'{self.dataset_folder}{self.stereo_folders[0]}{index_str}_left.png')
