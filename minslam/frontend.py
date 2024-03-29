@@ -145,7 +145,7 @@ class Frontend():
         if matcher_name == 'bruteforce':
             cross_check = self.params['frontend']['match']['cross_check']
             matcher = cv2.BFMatcher(cv2.NORM_L2, crossCheck=cross_check)
-            self.curr_frame.matches = matcher.match(self.last_frame.descriptors, self.curr_frame.descriptors)
+            self.curr_frame.matches = list(matcher.match(self.last_frame.descriptors, self.curr_frame.descriptors))
         elif matcher_name == 'opticalflow':
             curr_points_all, status, err = cv2.calcOpticalFlowPyrLK(
                 self.last_frame.gray, self.curr_frame.gray,
@@ -206,8 +206,8 @@ class Frontend():
             match.trainIdx = i
         self.curr_frame.points = points
 
-    def plot_features(self, fig=None, plot_id=True):
-        if is_notebook():
+    def plot_features(self, fig=None, plot_id=True, matplot=False):
+        if is_notebook() and not matplot:
             if fig is None:
                 fig = px.imshow(self.curr_frame.color)
             marker = {'symbol':'circle-open', 'color': 'yellow'}
@@ -235,13 +235,15 @@ class Frontend():
                     point[1])), 4, (255, 0, 0), 1)
             if fig is None:
                 fig = plt.figure()
-            plt.imshow(canvas[:, :, ::-1])
-            return fig
+                plt.imshow(canvas[:, :, ::-1])
+                return fig
+            else:
+                return canvas[:, :, ::-1]
 
-    def plot_matches(self, fig=None, plot_id=True):
+    def plot_matches(self, fig=None, plot_id=True, matplot=False):
         if self.frame_id == 0:
-            return self.plot_features(fig=fig, plot_id=plot_id)
-        if is_notebook():
+            return self.plot_features(fig=fig, plot_id=plot_id, matplot=matplot)
+        if is_notebook() and not matplot:
             canvas = np.concatenate([self.last_frame.color, self.curr_frame.color], axis=1)
             marker = {'symbol':'circle-open', 'color': 'yellow'}
             line = {'color': 'blue'}
@@ -302,8 +304,10 @@ class Frontend():
                     cv2.putText(canvas, str(self.curr_frame.global_id[match.trainIdx]), pt2, cv2.FONT_HERSHEY_SIMPLEX, 0.9, (0, 255, 255))
             if fig is None:
                 fig = plt.figure()
-            plt.imshow(canvas[:, :, ::-1])
-            return fig
+                plt.imshow(canvas[:, :, ::-1])
+                return fig
+            else:
+                return canvas[:, :, ::-1]
     
     def assign_global_id(self):
         if self.frame_id == 0:
