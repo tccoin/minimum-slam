@@ -89,6 +89,7 @@ class Backend():
                 generic_factors = self.factors[global_id].generic_factors
                 global_position_xyz = gtsam.Point3(self.camera.back_project(u, v, depth, pose).flatten())
                 if len(generic_factors) == 0:
+                    # if this is the first measurement for the landmark, add initial estimate
                     self.initial_estimate.insert(L(global_id), global_position_xyz)
                 noise = self.params['backend']['generic_projection_factor']['noise']
                 noise_model = gtsam.noiseModel.Isotropic.Sigma(2, noise)

@@ -37,10 +37,10 @@ backend:
   smart_projection_factor:
     enabled: false
     noise: 1
-    error_threshold: 1000
+    error_threshold: 10
   generic_projection_factor:
     enabled: true
-    noise: 1
+    noise: 0.1
   pose_prior:
-    sigma_rotation: 0.001
-    sigma_translation: 0.001
+    sigma_rotation: 0.1
+    sigma_translation: 0.3
