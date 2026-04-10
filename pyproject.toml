@@ -3,6 +3,7 @@ name = "minslam"
 version = "0.1.0"
 description = "A minimum python visual SLAM system"
 authors = [{name = "Junzhe Wu", email = "coin12.wu@gmail.com"}]
+dependencies = ["pytorch-lightning>=2.6.1,<3", "pytorch-metric-learning==2.3.0"]
 
 [tool.setuptools]
 packages = ["minslam"]
